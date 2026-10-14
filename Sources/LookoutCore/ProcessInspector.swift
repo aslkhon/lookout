@@ -53,6 +53,17 @@ public enum ProcessInspector {
         return Array(pids.prefix(Int(max(n, 0)))).filter { $0 > 0 }
     }
 
+    /// `pid` followed by its parent, grandparent, … up to (not including) launchd.
+    public static func ancestors(of pid: pid_t) -> [pid_t] {
+        var chain: [pid_t] = []
+        var current = pid
+        while current > 1, chain.count < 32, let info = info(current) {
+            chain.append(current)
+            current = info.ppid
+        }
+        return chain
+    }
+
     public static func isAlive(_ pid: pid_t) -> Bool {
         kill(pid, 0) == 0 || errno == EPERM
     }

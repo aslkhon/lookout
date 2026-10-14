@@ -3,7 +3,7 @@ import SwiftUI
 
 /// First-launch setup: installs hooks into Claude Code and Codex configs and asks for notification permission.
 struct SetupView: View {
-    static let size = CGSize(width: 540, height: 400)
+    static let size = CGSize(width: 540, height: 480)
 
     @ObservedObject var model: AppModel
     var close: () -> Void
@@ -14,6 +14,10 @@ struct SetupView: View {
     @State private var results: [String] = []
     @State private var claudeInstalled = false
     @State private var codexInstalled = false
+    @State private var useEditors = true
+    @State private var editorsInstalled = false
+
+    private let editors = VSCodeExtension.editors
 
     private var claudePresent: Bool { FileManager.default.fileExists(atPath: LookoutPaths.home.appendingPathComponent(".claude").path) }
     private var codexPresent: Bool { FileManager.default.fileExists(atPath: LookoutPaths.home.appendingPathComponent(".codex").path) }
@@ -36,6 +40,10 @@ struct SetupView: View {
                 agentToggle(
                     isOn: $useCodex, title: "Codex", present: codexPresent, installed: codexInstalled,
                     detail: "Adds hook entries to ~/.codex/hooks.json and marks them trusted in ~/.codex/config.toml via Codex itself.")
+                agentToggle(
+                    isOn: $useEditors, title: editors.isEmpty ? "VS Code extension" : "\(editors.map(\.name).joined(separator: ", ")) extension",
+                    present: !editors.isEmpty, installed: editorsInstalled,
+                    detail: "Lets Lookout jump to the exact window and terminal running an agent. Installs a small Lookout extension.")
             }
             .padding(12)
             .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
@@ -50,14 +58,14 @@ struct SetupView: View {
             Spacer(minLength: 0)
 
             HStack {
-                if claudeInstalled || codexInstalled {
-                    Button("Remove Hooks", role: .destructive) { uninstall() }.disabled(running)
+                if claudeInstalled || codexInstalled || editorsInstalled {
+                    Button("Remove", role: .destructive) { uninstall() }.disabled(running)
                 }
                 Spacer()
                 Button(results.isEmpty ? "Later" : "Done") { close() }.keyboardShortcut(.cancelAction)
-                Button("Install Hooks") { Task { await install() } }
+                Button("Install") { Task { await install() } }
                     .keyboardShortcut(.defaultAction)
-                    .disabled(running || !(useClaude && claudePresent || useCodex && codexPresent))
+                    .disabled(running || !(useClaude && claudePresent || useCodex && codexPresent || useEditors && !editors.isEmpty))
             }
         }
         .padding(20)
@@ -88,6 +96,8 @@ struct SetupView: View {
         codexInstalled = model.installer.isInstalled(.codex)
         useClaude = claudePresent
         useCodex = codexPresent
+        editorsInstalled = !editors.isEmpty && editors.allSatisfy { VSCodeExtension.isInstalled(bundleID: $0.bundleID) }
+        useEditors = !editors.isEmpty
     }
 
     private func install() async {
@@ -120,6 +130,17 @@ struct SetupView: View {
             }
         }
 
+        if useEditors {
+            for editor in editors {
+                do {
+                    try await Task.detached { try VSCodeExtension.install(bundleID: editor.bundleID) }.value
+                    results.append("✅ \(editor.name) extension installed")
+                } catch {
+                    results.append("⚠️ \(editor.name) extension: \(error.localizedDescription)")
+                }
+            }
+        }
+
         let granted = await Notifier.shared.requestAuthorization()
         results.append(granted ? "✅ Notifications enabled" : "⚠️ Notifications not allowed — enable them in System Settings › Notifications.")
         refresh()
@@ -134,6 +155,14 @@ struct SetupView: View {
                 results.append("Removed \(source.displayName) hooks")
             } catch {
                 results.append("❌ \(source.displayName): \(error.localizedDescription)")
+            }
+        }
+        for editor in editors where VSCodeExtension.isInstalled(bundleID: editor.bundleID) {
+            do {
+                try VSCodeExtension.uninstall(bundleID: editor.bundleID)
+                results.append("Removed \(editor.name) extension")
+            } catch {
+                results.append("❌ \(editor.name) extension: \(error.localizedDescription)")
             }
         }
         refresh()

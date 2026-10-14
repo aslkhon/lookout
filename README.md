@@ -55,8 +55,13 @@ claude / codex ──hook──▶ ~/.lookout/bin/lookout-hook ──unix socket
 - Clicking an agent:
   - **Ghostty**: focuses the terminal whose working directory matches, through Ghostty's
     AppleScript dictionary. macOS asks for Automation permission once.
-  - **VS Code / Cursor**: reopens the window whose folder contains the agent's cwd, which
-    focuses it. VS Code's API doesn't allow selecting the exact terminal tab.
+  - **VS Code / Cursor**: Setup installs a small companion extension (`Extensions/vscode`). Each
+    window publishes its folders and terminal shell PIDs to `~/.lookout/vscode/windows/`, so Lookout
+    finds the agent's exact window and terminal by walking the agent's parent processes. Lookout
+    reopens that window's folder (or, for multi-root workspaces, passes the workspace file to the
+    editor's `code` CLI), which focuses it, and asks the extension to reveal the terminal tab.
+    Without the extension it falls back to matching the agent's cwd against VS Code's saved
+    window list.
   - **Anything else**: activates the host app.
 
 Debug event flow with:

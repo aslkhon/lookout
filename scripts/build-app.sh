@@ -14,6 +14,8 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN/Lookout" "$BIN/lookout-hook" "$APP/Contents/MacOS/"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/"
+./scripts/package-vscode.sh
+cp build/lookout-vscode.vsix "$APP/Contents/Resources/"
 
 codesign --force --sign - --identifier io.github.aslkhon.lookout.hook "$APP/Contents/MacOS/lookout-hook"
 codesign --force --sign - "$APP"
