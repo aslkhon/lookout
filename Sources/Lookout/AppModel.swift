@@ -14,6 +14,8 @@ final class AppModel: ObservableObject {
     let installer = HookInstaller()
     private var server: EventServer?
     private var livenessTimer: Timer?
+    /// Sessions that have sent hook events; their status comes from hooks, not discovery.
+    private var hookDriven: Set<String> = []
 
     /// How long ended sessions stay in the list.
     private let endedRetention: TimeInterval = 10 * 60
@@ -48,8 +50,9 @@ final class AppModel: ObservableObject {
         }
 
         livenessTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { _ in
-            Task { @MainActor in AppModel.shared.checkLiveness() }
+            Task { @MainActor in AppModel.shared.refresh() }
         }
+        refresh()
         Notifier.shared.onActivate = { [weak self] id in
             guard let session = self?.sessions[id] else { return }
             Focuser.focus(session)
@@ -58,7 +61,10 @@ final class AppModel: ObservableObject {
 
     func handle(_ envelope: HookEnvelope) {
         let key = AgentSession.key(source: envelope.source, sessionID: envelope.payload.sessionID)
-        let old = sessions[key]
+        hookDriven.insert(key)
+        // A Codex agent found by scanning becomes this session once its hooks report in.
+        let placeholder = envelope.context.agentPID.map { "\(envelope.source.rawValue):pid:\($0)" }
+        let old = sessions[key] ?? placeholder.flatMap { sessions.removeValue(forKey: $0) }
         let new = SessionReducer.apply(envelope, to: old)
         sessions[key] = new
         log.debug("\(key, privacy: .public) \(envelope.payload.hookEventName, privacy: .public) → \(new.status.rawValue, privacy: .public) pid=\(new.agentPID.map(String.init) ?? "nil", privacy: .public)")
@@ -75,6 +81,31 @@ final class AppModel: ObservableObject {
 
     func clearEnded() {
         sessions = sessions.filter { $0.value.status != .ended }
+    }
+
+    private func refresh() {
+        checkLiveness()
+        Task.detached(priority: .utility) {
+            let found = AgentDiscovery.scan()
+            await MainActor.run { AppModel.shared.merge(found) }
+        }
+    }
+
+    /// Adds running agents that haven't sent a hook event (e.g. idle since before Lookout started).
+    private func merge(_ found: [DiscoveredAgent]) {
+        let knownPIDs = Set(sessions.values.filter { $0.status != .ended }.compactMap(\.agentPID))
+        for agent in found {
+            let key = agent.sessionID.map { AgentSession.key(source: agent.source, sessionID: $0) } ?? agent.placeholderKey
+            if hookDriven.contains(key) { continue }
+            if sessions[key] == nil, knownPIDs.contains(agent.pid) { continue }
+            let old = sessions[key]
+            let new = SessionReducer.apply(agent, to: old)
+            guard new != old else { continue }
+            sessions[key] = new
+            if old != nil, SessionReducer.shouldNotify(from: old?.status, to: new.status) {
+                Notifier.shared.post(for: new)
+            }
+        }
     }
 
     private func checkLiveness() {
