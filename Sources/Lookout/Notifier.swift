@@ -1,0 +1,60 @@
+import Foundation
+import LookoutCore
+import UserNotifications
+
+@MainActor
+final class Notifier: NSObject, UNUserNotificationCenterDelegate {
+    static let shared = Notifier()
+
+    /// Called with a session id when the user clicks a notification.
+    var onActivate: ((String) -> Void)?
+
+    private var center: UNUserNotificationCenter { .current() }
+
+    override init() {
+        super.init()
+        center.delegate = self
+    }
+
+    @discardableResult
+    func requestAuthorization() async -> Bool {
+        (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
+    }
+
+    func post(for session: AgentSession) {
+        let content = UNMutableNotificationContent()
+        switch session.status {
+        case .needsApproval:
+            content.title = "\(session.projectName) needs approval"
+            content.body = session.detail ?? "Waiting for permission"
+        case .needsInput:
+            content.title = "\(session.projectName) has a question"
+            content.body = session.detail ?? "Waiting for your input"
+        case .finished:
+            content.title = "\(session.projectName) finished"
+            content.body = session.detail ?? session.lastPrompt ?? "Turn complete"
+        default:
+            return
+        }
+        content.subtitle = session.source.displayName
+        content.sound = .default
+        content.userInfo = ["sessionID": session.id]
+        // Reusing the session id replaces any earlier notification for the same agent.
+        center.add(UNNotificationRequest(identifier: session.id, content: content, trigger: nil))
+    }
+
+    func clear(sessionID: String) {
+        center.removeDeliveredNotifications(withIdentifiers: [sessionID])
+    }
+
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                            willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
+        [.banner, .list, .sound]
+    }
+
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                            didReceive response: UNNotificationResponse) async {
+        guard let id = response.notification.request.content.userInfo["sessionID"] as? String else { return }
+        await MainActor.run { onActivate?(id) }
+    }
+}

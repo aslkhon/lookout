@@ -1,0 +1,124 @@
+import Foundation
+
+public enum AgentSource: String, Codable, Sendable {
+    case claude, codex
+
+    public var displayName: String {
+        switch self {
+        case .claude: "Claude Code"
+        case .codex: "Codex"
+        }
+    }
+}
+
+/// What `lookout-hook` sends over the socket: the agent's raw hook payload
+/// plus context about the process and terminal it came from.
+public struct HookEnvelope: Codable, Sendable {
+    public var source: AgentSource
+    public var context: HookContext
+    public var payload: HookPayload
+
+    public init(source: AgentSource, context: HookContext, payload: HookPayload) {
+        self.source = source
+        self.context = context
+        self.payload = payload
+    }
+}
+
+public struct HookContext: Codable, Sendable {
+    /// PID of the `claude` / `codex` process, used for liveness checks.
+    public var agentPID: Int32?
+    public var tty: String?
+    public var termProgram: String?
+    /// `__CFBundleIdentifier` inherited from the hosting app (Ghostty, VS Code, ...).
+    public var hostBundleID: String?
+    public var timestamp: Double
+
+    public init(agentPID: Int32? = nil, tty: String? = nil, termProgram: String? = nil,
+                hostBundleID: String? = nil, timestamp: Double = Date().timeIntervalSince1970) {
+        self.agentPID = agentPID
+        self.tty = tty
+        self.termProgram = termProgram
+        self.hostBundleID = hostBundleID
+        self.timestamp = timestamp
+    }
+}
+
+/// The subset of the Claude Code / Codex hook payload Lookout cares about.
+/// Both CLIs share this shape; unknown fields are ignored.
+public struct HookPayload: Codable, Sendable {
+    public var sessionID: String
+    public var hookEventName: String
+    public var cwd: String?
+    public var toolName: String?
+    public var toolInput: [String: JSONValue]?
+    public var notificationType: String?
+    public var message: String?
+    public var prompt: String?
+    public var lastAssistantMessage: String?
+
+    enum CodingKeys: String, CodingKey {
+        case sessionID = "session_id"
+        case hookEventName = "hook_event_name"
+        case cwd
+        case toolName = "tool_name"
+        case toolInput = "tool_input"
+        case notificationType = "notification_type"
+        case message
+        case prompt
+        case lastAssistantMessage = "last_assistant_message"
+    }
+
+    public init(sessionID: String, hookEventName: String, cwd: String? = nil, toolName: String? = nil,
+                toolInput: [String: JSONValue]? = nil, notificationType: String? = nil,
+                message: String? = nil, prompt: String? = nil, lastAssistantMessage: String? = nil) {
+        self.sessionID = sessionID
+        self.hookEventName = hookEventName
+        self.cwd = cwd
+        self.toolName = toolName
+        self.toolInput = toolInput
+        self.notificationType = notificationType
+        self.message = message
+        self.prompt = prompt
+        self.lastAssistantMessage = lastAssistantMessage
+    }
+
+    /// Short human description of the tool call, e.g. "Bash: npm test".
+    public var toolSummary: String? {
+        guard let toolName else { return nil }
+        let keys = ["command", "file_path", "path", "url", "pattern", "description"]
+        for key in keys {
+            if case .string(let value)? = toolInput?[key], !value.isEmpty {
+                return "\(toolName): \(value)"
+            }
+        }
+        return toolName
+    }
+}
+
+/// Minimal JSON value so arbitrary `tool_input` objects decode.
+public enum JSONValue: Codable, Sendable, Equatable {
+    case string(String), number(Double), bool(Bool), object([String: JSONValue]), array([JSONValue]), null
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        if c.decodeNil() { self = .null }
+        else if let v = try? c.decode(Bool.self) { self = .bool(v) }
+        else if let v = try? c.decode(Double.self) { self = .number(v) }
+        else if let v = try? c.decode(String.self) { self = .string(v) }
+        else if let v = try? c.decode([JSONValue].self) { self = .array(v) }
+        else { self = .object(try c.decode([String: JSONValue].self)) }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        switch self {
+        case .string(let v): try c.encode(v)
+        case .number(let v): try c.encode(v)
+        case .bool(let v): try c.encode(v)
+        case .object(let v): try c.encode(v)
+        case .array(let v): try c.encode(v)
+        case .null: try c.encodeNil()
+        }
+    }
+}
