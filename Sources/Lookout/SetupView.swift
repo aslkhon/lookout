@@ -110,10 +110,11 @@ struct SetupView: View {
                 try installer.install(.codex)
                 let hooksPath = installer.codexHooksURL.path
                 let trusted = try await Task.detached {
-                    guard let codex = CodexTrust.findCodex() else { throw CodexTrustError.codexNotFound }
-                    return try CodexTrust.trustLookoutHooks(hooksFile: hooksPath, codexPath: codex)
+                    let path = CodexTrust.shellPath()
+                    guard let codex = CodexTrust.findCodex(path: path) else { throw CodexTrustError.codexNotFound }
+                    return try CodexTrust.trustLookoutHooks(hooksFile: hooksPath, codexPath: codex, path: path)
                 }.value
-                results.append("✅ Codex hooks installed (\(trusted) newly trusted)")
+                results.append(trusted > 0 ? "✅ Codex hooks installed and trusted" : "✅ Codex hooks installed (already trusted)")
             } catch {
                 results.append("⚠️ Codex: \(error.localizedDescription) Codex will ask you to review the hooks on its next launch.")
             }

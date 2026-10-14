@@ -15,24 +15,32 @@ public enum CodexTrustError: LocalizedError {
 /// Marks Lookout's hooks as trusted in Codex by talking to `codex app-server`
 /// (`hooks/list` + `config/batchWrite`), so Codex itself writes `[hooks.state]` in config.toml.
 public enum CodexTrust {
-    /// Locates `codex` via the user's login shell, since GUI apps don't inherit the shell PATH.
-    public static func findCodex() -> String? {
-        let candidates = ["/opt/homebrew/bin/codex", "/usr/local/bin/codex",
-                          LookoutPaths.home.appendingPathComponent(".local/bin/codex").path]
-        if let found = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) {
-            return found
-        }
+    /// The user's login-shell PATH. GUI apps get a minimal PATH, and the npm `codex`
+    /// launcher is a `#!/usr/bin/env node` script that needs `node` on PATH.
+    public static func shellPath() -> String {
+        let fallback = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
-        guard let out = try? run(shell, ["-lc", "command -v codex"]) else { return nil }
-        let path = out.trimmingCharacters(in: .whitespacesAndNewlines)
-        return FileManager.default.isExecutableFile(atPath: path) ? path : nil
+        // Markers guard against shell startup files that print to stdout.
+        guard let out = try? run(shell, ["-lc", "printf '__PATH__%s__END__' \"$PATH\""]),
+              let start = out.range(of: "__PATH__"), let end = out.range(of: "__END__", range: start.upperBound..<out.endIndex)
+        else { return fallback }
+        let path = String(out[start.upperBound..<end.lowerBound])
+        return path.isEmpty ? fallback : path
+    }
+
+    /// Locates `codex` on the login-shell PATH.
+    public static func findCodex(path: String = shellPath()) -> String? {
+        let dirs = path.split(separator: ":").map(String.init)
+            + [LookoutPaths.home.appendingPathComponent(".local/bin").path]
+        return dirs.map { ($0 as NSString).appendingPathComponent("codex") }
+            .first { FileManager.default.isExecutableFile(atPath: $0) }
     }
 
     /// Trusts every untrusted hook in `hooksFile` whose command contains `lookout-hook`.
     /// Returns how many hooks were newly trusted.
     @discardableResult
-    public static func trustLookoutHooks(hooksFile: String, codexPath: String) throws -> Int {
-        let rpc = try AppServer(codexPath: codexPath)
+    public static func trustLookoutHooks(hooksFile: String, codexPath: String, path: String = shellPath()) throws -> Int {
+        let rpc = try AppServer(codexPath: codexPath, path: path)
         defer { rpc.close() }
         _ = try rpc.call("initialize", ["clientInfo": ["name": "lookout", "version": "1.0"]])
         try rpc.notify("initialized")
@@ -59,15 +67,19 @@ public enum CodexTrust {
         let process = Process()
         let stdin = Pipe()
         let stdout = Pipe()
+        let stderr = Pipe()
         var buffer = Data()
         var nextID = 1
 
-        init(codexPath: String) throws {
+        init(codexPath: String, path: String) throws {
             process.executableURL = URL(fileURLWithPath: codexPath)
             process.arguments = ["app-server"]
+            var env = ProcessInfo.processInfo.environment
+            env["PATH"] = path
+            process.environment = env
             process.standardInput = stdin
             process.standardOutput = stdout
-            process.standardError = FileHandle.nullDevice
+            process.standardError = stderr
             try process.run()
         }
 
@@ -109,7 +121,11 @@ public enum CodexTrust {
                     continue
                 }
                 let chunk = stdout.fileHandleForReading.availableData
-                if chunk.isEmpty { throw CodexTrustError.protocolError("app-server exited unexpectedly") }
+                if chunk.isEmpty {
+                    let err = String(decoding: stderr.fileHandleForReading.availableData, as: UTF8.self)
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    throw CodexTrustError.protocolError(err.isEmpty ? "app-server exited unexpectedly" : String(err.prefix(300)))
+                }
                 buffer.append(chunk)
             }
         }
