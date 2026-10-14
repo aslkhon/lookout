@@ -127,8 +127,8 @@ enum RemoteSetup {
         }
         let output = try await RemoteHosts.run(host, """
             command -v python3 >/dev/null || { echo "python3 is required on the server" >&2; exit 3; }
-            mkdir -p ~/.lookout/bin && cat > ~/.lookout/bin/lookout-hook.tmp \
-              && chmod +x ~/.lookout/bin/lookout-hook.tmp \
+            umask 077 && mkdir -p ~/.lookout/bin && cat > ~/.lookout/bin/lookout-hook.tmp \
+              && chmod 700 ~/.lookout/bin/lookout-hook.tmp \
               && mv ~/.lookout/bin/lookout-hook.tmp ~/.lookout/bin/lookout-hook \
               && ~/.lookout/bin/lookout-hook --install
             """, input: data)
