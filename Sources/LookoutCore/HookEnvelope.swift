@@ -17,11 +17,14 @@ public struct HookEnvelope: Codable, Sendable {
     public var source: AgentSource
     public var context: HookContext
     public var payload: HookPayload
+    /// The ssh host the event came from; nil for this Mac. Set by Lookout, not sent by hooks.
+    public var host: String?
 
-    public init(source: AgentSource, context: HookContext, payload: HookPayload) {
+    public init(source: AgentSource, context: HookContext, payload: HookPayload, host: String? = nil) {
         self.source = source
         self.context = context
         self.payload = payload
+        self.host = host
     }
 }
 
@@ -33,14 +36,25 @@ public struct HookContext: Codable, Sendable {
     /// `__CFBundleIdentifier` inherited from the hosting app (Ghostty, VS Code, ...).
     public var hostBundleID: String?
     public var timestamp: Double
+    // Sent by the server-side hook (Remote/lookout-hook), where Lookout can't inspect processes itself.
+    /// The agent PID followed by its parents.
+    public var ancestors: [Int32]?
+    /// `$TERM`, e.g. "xterm-ghostty"; ssh forwards it while TERM_PROGRAM usually isn't.
+    public var term: String?
+    /// Source port of the ssh connection (from `$SSH_CONNECTION`), identifying the local `ssh` process.
+    public var sshClientPort: Int?
 
     public init(agentPID: Int32? = nil, tty: String? = nil, termProgram: String? = nil,
-                hostBundleID: String? = nil, timestamp: Double = Date().timeIntervalSince1970) {
+                hostBundleID: String? = nil, timestamp: Double = Date().timeIntervalSince1970,
+                ancestors: [Int32]? = nil, term: String? = nil, sshClientPort: Int? = nil) {
         self.agentPID = agentPID
         self.tty = tty
         self.termProgram = termProgram
         self.hostBundleID = hostBundleID
         self.timestamp = timestamp
+        self.ancestors = ancestors
+        self.term = term
+        self.sshClientPort = sshClientPort
     }
 }
 

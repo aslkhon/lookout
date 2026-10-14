@@ -12,6 +12,7 @@ final class AppModel: ObservableObject {
     @Published var serverError: String?
 
     let installer = HookInstaller()
+    let remotes = RemoteHosts()
     private var server: EventServer?
     private var livenessTimer: Timer?
     /// Sessions that have sent hook events; their status comes from hooks, not discovery.
@@ -32,6 +33,7 @@ final class AppModel: ObservableObject {
 
     func start() {
         installHookBinary()
+        VSCodeExtension.upgradeInstalled()
         let server = EventServer(path: LookoutPaths.socket.path) { data in
             let envelope: HookEnvelope
             do {
@@ -53,6 +55,8 @@ final class AppModel: ObservableObject {
             Task { @MainActor in AppModel.shared.refresh() }
         }
         refresh()
+        remotes.onMessage = { host, message in AppModel.shared.handleRemote(host: host, message) }
+        remotes.start()
         Notifier.shared.onActivate = { [weak self] id in
             guard let session = self?.sessions[id] else { return }
             Focuser.focus(session)
@@ -60,10 +64,12 @@ final class AppModel: ObservableObject {
     }
 
     func handle(_ envelope: HookEnvelope) {
-        let key = AgentSession.key(source: envelope.source, sessionID: envelope.payload.sessionID)
+        let key = AgentSession.key(source: envelope.source, sessionID: envelope.payload.sessionID, host: envelope.host)
         hookDriven.insert(key)
         // A Codex agent found by scanning becomes this session once its hooks report in.
-        let placeholder = envelope.context.agentPID.map { "\(envelope.source.rawValue):pid:\($0)" }
+        let placeholder = envelope.context.agentPID.map {
+            AgentSession.key(source: envelope.source, sessionID: "pid:\($0)", host: envelope.host)
+        }
         let old = sessions[key] ?? placeholder.flatMap { sessions.removeValue(forKey: $0) }
         let new = SessionReducer.apply(envelope, to: old)
         sessions[key] = new
@@ -79,6 +85,16 @@ final class AppModel: ObservableObject {
         Focuser.focus(session)
     }
 
+    /// Stops watching `host` and drops its sessions.
+    func removeHost(_ host: String) {
+        remotes.remove(host)
+        for (key, session) in sessions where session.host == host {
+            sessions[key] = nil
+            hookDriven.remove(key)
+            Notifier.shared.clear(sessionID: key)
+        }
+    }
+
     func clearEnded() {
         sessions = sessions.filter { $0.value.status != .ended }
     }
@@ -92,11 +108,40 @@ final class AppModel: ObservableObject {
     }
 
     /// Adds running agents that haven't sent a hook event (e.g. idle since before Lookout started).
-    private func merge(_ found: [DiscoveredAgent]) {
-        let knownPIDs = Set(sessions.values.filter { $0.status != .ended }.compactMap(\.agentPID))
+    func handleRemote(host: String, _ message: RemoteMessage) {
+        switch message {
+        case .hello:
+            break
+        case .event(let envelope):
+            handle(envelope)
+        case .agents(let found, let alive):
+            merge(found, host: host)
+            for (key, session) in sessions where session.host == host && session.status != .ended {
+                if let pid = session.agentPID, !alive.contains(pid) { end(key) }
+            }
+        }
+    }
+
+    private func end(_ key: String) {
+        guard var session = sessions[key] else { return }
+        session.status = .ended
+        session.statusSince = Date()
+        sessions[key] = session
+        Notifier.shared.clear(sessionID: key)
+    }
+
+    private func merge(_ found: [DiscoveredAgent], host: String? = nil) {
+        let knownPIDs = Set(sessions.values.filter { $0.status != .ended && $0.host == host }.compactMap(\.agentPID))
         for agent in found {
-            let key = agent.sessionID.map { AgentSession.key(source: agent.source, sessionID: $0) } ?? agent.placeholderKey
-            if hookDriven.contains(key) { continue }
+            let key = agent.key
+            if hookDriven.contains(key) {
+                // Hooks own the status; still pick up process details only a scan knows (remote ancestors).
+                if agent.host != nil, var session = sessions[key], session.ancestors != agent.ancestors {
+                    session.ancestors = agent.ancestors
+                    sessions[key] = session
+                }
+                continue
+            }
             if sessions[key] == nil, knownPIDs.contains(agent.pid) { continue }
             let old = sessions[key]
             let new = SessionReducer.apply(agent, to: old)
@@ -113,12 +158,8 @@ final class AppModel: ObservableObject {
         for (key, session) in sessions {
             if session.status == .ended {
                 if now.timeIntervalSince(session.statusSince) > endedRetention { sessions[key] = nil }
-            } else if let pid = session.agentPID, !Self.isAlive(pid) {
-                var ended = session
-                ended.status = .ended
-                ended.statusSince = now
-                sessions[key] = ended
-                Notifier.shared.clear(sessionID: key)
+            } else if session.host == nil, let pid = session.agentPID, !Self.isAlive(pid) {
+                end(key) // remote sessions are checked by their host's snapshots
             }
         }
     }

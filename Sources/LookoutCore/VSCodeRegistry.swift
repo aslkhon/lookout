@@ -6,6 +6,10 @@ public enum VSCodeRegistry {
         /// Extension host PID; identifies the window.
         public var pid: Int32
         public var appRoot: String
+        /// e.g. "ssh-remote+myserver" for Remote-SSH windows (extension ≥ 0.2.0).
+        public var remoteAuthority: String?
+        /// `vscode-remote://…` folder URIs of a remote window.
+        public var remoteFolders: [String]?
         /// Saved `.code-workspace` file; nil for single-folder and untitled multi-root windows.
         public var workspaceFile: String?
         public var folders: [String]
@@ -38,7 +42,18 @@ public enum VSCodeRegistry {
 
     /// The window (and terminal) hosting `agentPID`, found by walking its process ancestors.
     public static func match(agentPID: Int32, windows: [Window] = windows()) -> Match? {
-        match(ancestors: ProcessInspector.ancestors(of: agentPID), windows: windows)
+        match(ancestors: ProcessInspector.ancestors(of: agentPID), windows: windows.filter { $0.remoteAuthority == nil })
+    }
+
+    /// The Remote-SSH window and terminal hosting an agent on `host`, given the agent's ancestor PIDs
+    /// on that host. Windows connected to a different host are ignored, since PIDs only mean
+    /// something per machine.
+    public static func match(host: String, ancestors: [Int32], windows: [Window] = windows()) -> Match? {
+        let remote = windows.filter { window in
+            guard let authority = window.remoteAuthority else { return false }
+            return SSHHost.matches(authority: authority, host: host)
+        }
+        return match(ancestors: ancestors, windows: remote)
     }
 
     static func match(ancestors: [Int32], windows: [Window]) -> Match? {

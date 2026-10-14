@@ -16,6 +16,7 @@ cp Resources/Info.plist "$APP/Contents/Info.plist"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/"
 ./scripts/package-vscode.sh
 cp build/lookout-vscode.vsix "$APP/Contents/Resources/"
+cp Remote/lookout-hook "$APP/Contents/Resources/remote-lookout-hook"
 
 codesign --force --sign - --identifier io.github.aslkhon.lookout.hook "$APP/Contents/MacOS/lookout-hook"
 codesign --force --sign - "$APP"

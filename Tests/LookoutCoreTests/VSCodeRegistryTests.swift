@@ -31,3 +31,35 @@ struct VSCodeRegistryTests {
         #expect(w.terminals == [79830, 79829] && w.workspaceFile == nil)
     }
 }
+
+struct RemoteMatchTests {
+    let windows = [
+        VSCodeRegistry.Window(pid: 79820, appRoot: "/a", remoteAuthority: "ssh-remote+unicon",
+                              remoteFolders: ["vscode-remote://ssh-remote%2Bunicon/home/syncall/project"],
+                              workspaceFile: nil, folders: [], terminals: [1289002, 1289050]),
+        VSCodeRegistry.Window(pid: 79821, appRoot: "/a", workspaceFile: nil, folders: ["/p/syncall"], terminals: [1289050]),
+    ]
+
+    @Test func matchesRemoteTerminalOnSameHost() {
+        let m = VSCodeRegistry.match(host: "unicon", ancestors: [1290000, 1289050, 1288000], windows: windows)
+        #expect(m?.window.pid == 79820)
+        #expect(m?.terminal == 1289050)
+    }
+
+    @Test func ignoresOtherHostsAndLocalWindows() {
+        #expect(VSCodeRegistry.match(host: "deploy", ancestors: [1289050], windows: windows) == nil)
+        // A local window must never claim a remote PID, and vice versa.
+        #expect(VSCodeRegistry.match(ancestors: [1289002], windows: windows.filter { $0.remoteAuthority == nil }) == nil)
+    }
+
+    @Test func hostSpellings() {
+        #expect(SSHHost.name("ssh://dev@127.0.0.1:2222") == "127.0.0.1")
+        #expect(SSHHost.name("deploy@10.0.0.6") == "10.0.0.6")
+        #expect(SSHHost.matches(authority: "ssh-remote+unicon", host: "unicon"))
+        #expect(SSHHost.matches(authority: "ssh-remote%2Bunicon", host: "UNICON"))
+        // {"hostName":"myserver"} hex-encoded, as VS Code writes for hosts with options.
+        let hex = Data(#"{"hostName":"myserver"}"#.utf8).map { String(format: "%02x", $0) }.joined()
+        #expect(SSHHost.matches(authority: "ssh-remote+\(hex)", host: "myserver"))
+        #expect(!SSHHost.matches(authority: "dev-container+abc", host: "abc"))
+    }
+}

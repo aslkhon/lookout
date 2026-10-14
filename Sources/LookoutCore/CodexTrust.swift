@@ -40,12 +40,23 @@ public enum CodexTrust {
     /// Returns how many hooks were newly trusted.
     @discardableResult
     public static func trustLookoutHooks(hooksFile: String, codexPath: String, path: String = shellPath()) throws -> Int {
-        let rpc = try AppServer(codexPath: codexPath, path: path)
+        var env = ProcessInfo.processInfo.environment
+        env["PATH"] = path
+        return try trustLookoutHooks(hooksFile: hooksFile, home: LookoutPaths.home.path,
+                                     executable: codexPath, arguments: ["app-server"], environment: env)
+    }
+
+    /// Same, for a Codex reached another way, e.g. `ssh <host> codex app-server`.
+    /// `hooksFile` and `home` are paths on the machine Codex runs on.
+    @discardableResult
+    public static func trustLookoutHooks(hooksFile: String, home: String, executable: String, arguments: [String],
+                                         environment: [String: String]? = nil) throws -> Int {
+        let rpc = try AppServer(executable: executable, arguments: arguments, environment: environment)
         defer { rpc.close() }
         _ = try rpc.call("initialize", ["clientInfo": ["name": "lookout", "version": "1.0"]])
         try rpc.notify("initialized")
 
-        let list = try rpc.call("hooks/list", ["cwds": [LookoutPaths.home.path]])
+        let list = try rpc.call("hooks/list", ["cwds": [home]])
         let entries = ((list["data"] as? [[String: Any]])?.first?["hooks"] as? [[String: Any]]) ?? []
         var state: [String: Any] = [:]
         for hook in entries {
@@ -71,12 +82,10 @@ public enum CodexTrust {
         var buffer = Data()
         var nextID = 1
 
-        init(codexPath: String, path: String) throws {
-            process.executableURL = URL(fileURLWithPath: codexPath)
-            process.arguments = ["app-server"]
-            var env = ProcessInfo.processInfo.environment
-            env["PATH"] = path
-            process.environment = env
+        init(executable: String, arguments: [String], environment: [String: String]?) throws {
+            process.executableURL = URL(fileURLWithPath: executable)
+            process.arguments = arguments
+            if let environment { process.environment = environment }
             process.standardInput = stdin
             process.standardOutput = stdout
             process.standardError = stderr

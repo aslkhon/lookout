@@ -15,6 +15,7 @@ enum Focuser {
     ]
 
     static func focus(_ session: AgentSession) {
+        if session.host != nil { return focusRemote(session) }
         guard let bundleID = session.hostBundleID else { return }
         if bundleID == ghosttyID, focusGhostty(cwd: session.cwd) { return }
         if let support = vscodeFamily[bundleID] {
@@ -39,7 +40,14 @@ enum Focuser {
 
     /// Focuses the Ghostty terminal whose working directory matches `cwd`.
     static func focusGhostty(cwd: String) -> Bool {
+        guard let terminals = ghosttyTerminals(), let id = pickGhosttyTerminal(terminals, cwd: cwd) else { return false }
+        return focusGhosttyTerminal(id: id)
+    }
+
+    /// Every Ghostty terminal as [id, working directory, title].
+    static func ghosttyTerminals() -> [[String]]? {
         let listScript = """
+        set sep to character id 9 -- not `tab`: inside the tell block that names Ghostty's tab class
         tell application id "\(ghosttyID)"
             set out to ""
             repeat with t in terminals
@@ -51,15 +59,16 @@ enum Focuser {
                 try
                     set nm to name of t
                 end try
-                set out to out & (id of t) & tab & wd & tab & nm & linefeed
+                set out to out & (id of t) & sep & wd & sep & nm & linefeed
             end repeat
             return out
         end tell
         """
-        guard let listing = runAppleScript(listScript) else { return false }
-        let terminals = listing.split(separator: "\n").map { $0.split(separator: "\t", omittingEmptySubsequences: false).map(String.init) }
-        guard let id = pickGhosttyTerminal(terminals, cwd: cwd) else { return false }
+        guard let listing = runAppleScript(listScript) else { return nil }
+        return listing.split(separator: "\n").map { $0.split(separator: "\t", omittingEmptySubsequences: false).map(String.init) }
+    }
 
+    static func focusGhosttyTerminal(id: String) -> Bool {
         let focusScript = """
         tell application id "\(ghosttyID)"
             repeat with t in terminals
@@ -115,16 +124,7 @@ enum Focuser {
     /// Open windows and their local folders, from VS Code's persisted window state. It's written
     /// with a delay, so the Lookout extension's live registry is preferred when available.
     static func savedWindows(support: String) -> [(folders: [String], window: VSCodeWindow)] {
-        let storage = LookoutPaths.home
-            .appendingPathComponent("Library/Application Support/\(support)/User/globalStorage/storage.json")
-        guard let data = FileManager.default.contents(atPath: storage.path),
-              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let state = root["windowsState"] as? [String: Any] else { return [] }
-
-        var windows = state["openedWindows"] as? [[String: Any]] ?? []
-        if let last = state["lastActiveWindow"] as? [String: Any] { windows.append(last) }
-
-        return windows.compactMap { window in
+        savedWindowEntries(support: support).compactMap { window in
             if let folder = (window["folder"] as? String).flatMap(URL.init(string:)), folder.isFileURL {
                 return ([folder.path], .folder(folder))
             }
@@ -134,6 +134,18 @@ enum Focuser {
             }
             return nil
         }
+    }
+
+    /// Raw `windowsState` entries (open windows plus the last active one) from storage.json.
+    static func savedWindowEntries(support: String) -> [[String: Any]] {
+        let storage = LookoutPaths.home
+            .appendingPathComponent("Library/Application Support/\(support)/User/globalStorage/storage.json")
+        guard let data = FileManager.default.contents(atPath: storage.path),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let state = root["windowsState"] as? [String: Any] else { return [] }
+        var windows = state["openedWindows"] as? [[String: Any]] ?? []
+        if let last = state["lastActiveWindow"] as? [String: Any] { windows.append(last) }
+        return windows
     }
 
     /// Local folder paths listed in a workspace config (JSON with comments; paths may be relative).
@@ -161,10 +173,15 @@ enum Focuser {
     /// macOS (Finder/NSWorkspace) as plain files, but recognizes workspace configs passed on the
     /// command line, focusing the window that already has the workspace open.
     static func openWorkspace(_ config: URL, bundleID: String) {
+        runEditorCLI(bundleID: bundleID, [config.path])
+    }
+
+    /// Runs the editor's own CLI against the main app, falling back to activating it.
+    static func runEditorCLI(bundleID: String, _ arguments: [String]) {
         guard let cli = VSCodeExtension.cli(bundleID: bundleID) else { return activate(bundleID: bundleID) }
         let process = Process()
         process.executableURL = cli
-        process.arguments = [config.path]
+        process.arguments = arguments
         var env = ProcessInfo.processInfo.environment
         env["VSCODE_IPC_HOOK_CLI"] = nil // talk to the main app, not a terminal's window
         process.environment = env
@@ -191,7 +208,7 @@ enum Focuser {
         return p
     }
 
-    private static func runAppleScript(_ source: String) -> String? {
+    static func runAppleScript(_ source: String) -> String? {
         var error: NSDictionary?
         guard let result = NSAppleScript(source: source)?.executeAndReturnError(&error), error == nil else {
             if let error { NSLog("Lookout AppleScript error: \(error)") }

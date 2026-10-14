@@ -21,8 +21,10 @@ public enum AgentStatus: String, Codable, Sendable, CaseIterable {
 }
 
 public struct AgentSession: Identifiable, Sendable, Equatable {
-    public var id: String { "\(source.rawValue):\(sessionID)" }
+    public var id: String { Self.key(source: source, sessionID: sessionID, host: host) }
     public var source: AgentSource
+    /// ssh host alias the agent runs on; nil for this Mac.
+    public var host: String?
     public var sessionID: String
     public var cwd: String
     public var status: AgentStatus
@@ -36,14 +38,18 @@ public struct AgentSession: Identifiable, Sendable, Equatable {
     public var tty: String?
     public var termProgram: String?
     public var hostBundleID: String?
+    // Remote agents only (see HookContext).
+    public var ancestors: [Int32]?
+    public var term: String?
+    public var sshClientPort: Int?
 
     public var projectName: String {
         let name = URL(fileURLWithPath: cwd).lastPathComponent
         return name.isEmpty ? cwd : name
     }
 
-    public static func key(source: AgentSource, sessionID: String) -> String {
-        "\(source.rawValue):\(sessionID)"
+    public static func key(source: AgentSource, sessionID: String, host: String? = nil) -> String {
+        (host.map { "\($0)/" } ?? "") + "\(source.rawValue):\(sessionID)"
     }
 }
 
@@ -56,14 +62,18 @@ public enum SessionReducer {
         let p = envelope.payload
         let ctx = envelope.context
         var s = existing ?? AgentSession(
-            source: envelope.source, sessionID: p.sessionID, cwd: p.cwd ?? "~",
+            source: envelope.source, host: envelope.host, sessionID: p.sessionID, cwd: p.cwd ?? "~",
             status: .idle, statusSince: now, lastEventAt: now)
+        s.sessionID = p.sessionID // a placeholder found by scanning gets its real id
 
         if let cwd = p.cwd { s.cwd = cwd }
         s.agentPID = ctx.agentPID ?? s.agentPID
         s.tty = ctx.tty ?? s.tty
         s.termProgram = ctx.termProgram ?? s.termProgram
         s.hostBundleID = ctx.hostBundleID ?? s.hostBundleID
+        s.ancestors = ctx.ancestors ?? s.ancestors
+        s.term = ctx.term ?? s.term
+        s.sshClientPort = ctx.sshClientPort ?? s.sshClientPort
         s.lastEventAt = now
         if let prompt = p.prompt, !prompt.isEmpty { s.lastPrompt = prompt }
 

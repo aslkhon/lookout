@@ -41,6 +41,32 @@ To remove the hooks, open **Setup… → Remove Hooks**.
 Clicking an agent jumps to its terminal. **Open Window** in the menu opens a dashboard, which
 filters agents by status or project and shows details for the selected one.
 
+## Remote hosts (ssh)
+
+Lookout can also watch agents on servers you ssh into, from VS Code Remote-SSH or a terminal.
+Add a host in **Setup… → Remote Hosts** (aliases from `~/.ssh/config` are offered). The server needs:
+
+- key-based ssh login that works without a prompt (Lookout runs `ssh -o BatchMode=yes`);
+- `python3` (3.6+).
+
+Adding a host uploads one script to `~/.lookout/bin/lookout-hook` on the server and adds its hooks
+to `~/.claude/settings.json` and `~/.codex/hooks.json` there (with backups, as on the Mac). Lookout
+then keeps one ssh connection open per host running `lookout-hook --watch`, which streams hook
+events and the list of running agents. Nothing listens on a port, and the server never connects back.
+**Remove** takes the hooks out again.
+
+Clicking a remote agent:
+
+- **VS Code Remote-SSH**: focuses the window connected to that host and reveals the agent's
+  terminal (needs the companion extension 0.2.0 or later; reload VS Code windows once after
+  updating Lookout).
+- **Ghostty**: finds the local `ssh` process carrying the session (by its TCP port, else by host
+  name in its arguments) and focuses the Ghostty terminal running it.
+- **Other terminals**: activates the app running that `ssh`.
+
+Agents inside `tmux` or `screen` on the server are shown, but focusing only reaches them while the
+session is attached in a local terminal.
+
 ## How it works
 
 ```

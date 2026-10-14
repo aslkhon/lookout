@@ -16,11 +16,16 @@ const windowFile = path.join(windowsDir, id + '.json');
 async function publish() {
     const pids = await Promise.all(vscode.window.terminals.map((t) => t.processId));
     const workspaceFile = vscode.workspace.workspaceFile;
+    const folders = vscode.workspace.workspaceFolders || [];
+    // Remote windows (e.g. "ssh-remote+myserver"): folders and terminal PIDs are on that machine.
+    const remote = folders.find((f) => f.uri.scheme === 'vscode-remote');
     const info = {
         pid: process.pid,
         appRoot: vscode.env.appRoot,
+        remoteAuthority: remote ? remote.uri.authority : null,
+        remoteFolders: folders.filter((f) => f.uri.scheme === 'vscode-remote').map((f) => f.uri.toString()),
         workspaceFile: workspaceFile && workspaceFile.scheme === 'file' ? workspaceFile.fsPath : null,
-        folders: (vscode.workspace.workspaceFolders || []).filter((f) => f.uri.scheme === 'file').map((f) => f.uri.fsPath),
+        folders: folders.filter((f) => f.uri.scheme === 'file').map((f) => f.uri.fsPath),
         terminals: pids.filter((pid) => typeof pid === 'number'),
     };
     try {

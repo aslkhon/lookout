@@ -183,6 +183,7 @@ struct AgentDetailView: View {
                 HStack(spacing: 8) {
                     Text(session.projectName).font(.title2.weight(.semibold))
                     SourceBadge(source: session.source)
+                    if let host = session.host { HostBadge(host: host) }
                 }
                 HStack(spacing: 6) {
                     StatusDot(status: session.status)
@@ -211,6 +212,7 @@ struct AgentDetailView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Details").font(.caption.weight(.semibold)).foregroundStyle(.secondary).textCase(.uppercase)
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 8) {
+                row("Host", session.host)
                 row("Directory", session.cwd)
                 row("App", hostName ?? session.hostBundleID)
                 row("Terminal", [session.termProgram, session.tty].compactMap { $0 }.joined(separator: " · "))

@@ -2,7 +2,7 @@
   "name": "lookout-vscode",
   "displayName": "Lookout",
   "description": "Lets the Lookout macOS app jump to the exact window and terminal running an agent.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "aslkhon",
   "license": "MIT",
   "repository": { "type": "git", "url": "https://github.com/aslkhon/lookout" },

@@ -3,7 +3,7 @@ import SwiftUI
 
 /// First-launch setup: installs hooks into Claude Code and Codex configs and asks for notification permission.
 struct SetupView: View {
-    static let size = CGSize(width: 540, height: 480)
+    static let size = CGSize(width: 560, height: 640)
 
     @ObservedObject var model: AppModel
     var close: () -> Void
@@ -45,8 +45,13 @@ struct SetupView: View {
                     present: !editors.isEmpty, installed: editorsInstalled,
                     detail: "Lets Lookout jump to the exact window and terminal running an agent. Installs a small Lookout extension.")
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(12)
             .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+
+            RemoteHostsSection(model: model, remotes: model.remotes)
+                .padding(12)
+                .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
 
             Text("Existing hooks and settings are kept, and a timestamped backup of each file is saved next to it. Agents that are already running pick up the hooks after a restart. Lookout will also ask to send notifications.")
                 .font(.caption).foregroundStyle(.secondary)

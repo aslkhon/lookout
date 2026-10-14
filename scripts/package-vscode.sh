@@ -3,6 +3,8 @@
 set -eu
 cd "$(dirname "$0")/.."
 VERSION=$(sed -n 's/.*"version": "\(.*\)".*/\1/p' Extensions/vscode/package.json)
+grep -q "static let version = \"$VERSION\"" Sources/Lookout/VSCodeExtension.swift \
+  || { echo "VSCodeExtension.version doesn't match Extensions/vscode/package.json ($VERSION)" >&2; exit 1; }
 STAGE=$(mktemp -d)
 mkdir -p "$STAGE/extension"
 cp Extensions/vscode/package.json Extensions/vscode/extension.js LICENSE "$STAGE/extension/"

@@ -3,6 +3,8 @@ import Foundation
 /// An agent found by scanning the machine rather than through a hook event.
 public struct DiscoveredAgent: Equatable, Sendable {
     public var source: AgentSource
+    /// ssh host alias; nil for this Mac.
+    public var host: String?
     public var pid: Int32
     /// Known for Claude (from its session file); nil for Codex until a hook reports it.
     public var sessionID: String?
@@ -13,15 +15,24 @@ public struct DiscoveredAgent: Equatable, Sendable {
     public var detail: String?
     public var tty: String?
     public var hostBundleID: String?
+    // Remote agents only (see HookContext).
+    public var ancestors: [Int32]?
+    public var term: String?
+    public var termProgram: String?
+    public var sshClientPort: Int?
 
-    public init(source: AgentSource, pid: Int32, sessionID: String? = nil, cwd: String, status: AgentStatus? = nil,
-                statusSince: Date? = nil, detail: String? = nil, tty: String? = nil, hostBundleID: String? = nil) {
-        self.source = source; self.pid = pid; self.sessionID = sessionID; self.cwd = cwd; self.status = status
-        self.statusSince = statusSince; self.detail = detail; self.tty = tty; self.hostBundleID = hostBundleID
+    public init(source: AgentSource, host: String? = nil, pid: Int32, sessionID: String? = nil, cwd: String,
+                status: AgentStatus? = nil, statusSince: Date? = nil, detail: String? = nil, tty: String? = nil,
+                hostBundleID: String? = nil) {
+        self.source = source; self.host = host; self.pid = pid; self.sessionID = sessionID; self.cwd = cwd
+        self.status = status; self.statusSince = statusSince; self.detail = detail; self.tty = tty
+        self.hostBundleID = hostBundleID
     }
 
+    public var key: String { AgentSession.key(source: source, sessionID: sessionID ?? "pid:\(pid)", host: host) }
+
     /// Key used before a hook gives us the real session id.
-    public var placeholderKey: String { "\(source.rawValue):pid:\(pid)" }
+    public var placeholderKey: String { AgentSession.key(source: source, sessionID: "pid:\(pid)", host: host) }
 }
 
 /// Finds running agents so Lookout shows them even when they've been idle since before it launched.
@@ -97,7 +108,7 @@ extension SessionReducer {
     /// Session state for an agent found by scanning. Only used for sessions without hook events.
     public static func apply(_ agent: DiscoveredAgent, to existing: AgentSession?, now: Date = Date()) -> AgentSession {
         var s = existing ?? AgentSession(
-            source: agent.source, sessionID: agent.sessionID ?? "pid:\(agent.pid)", cwd: agent.cwd,
+            source: agent.source, host: agent.host, sessionID: agent.sessionID ?? "pid:\(agent.pid)", cwd: agent.cwd,
             status: .idle, statusSince: agent.statusSince ?? now, lastEventAt: now)
         let status = agent.status ?? .idle
         if status != s.status { s.statusSince = agent.statusSince ?? now }
@@ -107,6 +118,10 @@ extension SessionReducer {
         s.agentPID = agent.pid
         s.tty = agent.tty
         s.hostBundleID = agent.hostBundleID ?? s.hostBundleID
+        s.ancestors = agent.ancestors ?? s.ancestors
+        s.term = agent.term ?? s.term
+        s.termProgram = agent.termProgram ?? s.termProgram
+        s.sshClientPort = agent.sshClientPort ?? s.sshClientPort
         return s
     }
 }

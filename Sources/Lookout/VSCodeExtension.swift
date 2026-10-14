@@ -4,6 +4,8 @@ import LookoutCore
 /// Installs the bundled Lookout extension (lookout-vscode.vsix) into VS Code–family editors.
 enum VSCodeExtension {
     static let id = "aslkhon.lookout-vscode"
+    /// Version of the bundled vsix; scripts/package-vscode.sh checks it against package.json.
+    static let version = "0.2.0"
 
     /// Bundle id → extensions folder (relative to home).
     static let extensionDirs: [String: String] = [
@@ -22,10 +24,27 @@ enum VSCodeExtension {
     }
 
     static func isInstalled(bundleID: String) -> Bool {
-        guard let dir = extensionDirs[bundleID] else { return false }
+        installedFolders(bundleID: bundleID).contains { $0.hasPrefix(id + "-") }
+    }
+
+    /// Installed, but not the version bundled with this Lookout.
+    static func isOutdated(bundleID: String) -> Bool {
+        isInstalled(bundleID: bundleID) && !installedFolders(bundleID: bundleID).contains("\(id)-\(version)")
+    }
+
+    /// Updates the extension in editors that have an older version, e.g. after Lookout itself updated.
+    static func upgradeInstalled() {
+        let outdated = editors.filter { isOutdated(bundleID: $0.bundleID) }
+        guard !outdated.isEmpty else { return }
+        Task.detached {
+            for editor in outdated { try? install(bundleID: editor.bundleID) }
+        }
+    }
+
+    private static func installedFolders(bundleID: String) -> [String] {
+        guard let dir = extensionDirs[bundleID] else { return [] }
         let path = LookoutPaths.home.appendingPathComponent(dir).path
-        let entries = (try? FileManager.default.contentsOfDirectory(atPath: path)) ?? []
-        return entries.contains { $0.hasPrefix(id + "-") }
+        return (try? FileManager.default.contentsOfDirectory(atPath: path)) ?? []
     }
 
     /// The editor's own command-line tool, e.g. `…/Visual Studio Code.app/Contents/Resources/app/bin/code`.

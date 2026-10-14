@@ -141,6 +141,7 @@ struct SessionSummary: View {
                 HStack(spacing: 6) {
                     Text(session.projectName).font(.system(.body, weight: .semibold)).lineLimit(1)
                     SourceBadge(source: session.source)
+                    if let host = session.host { HostBadge(host: host) }
                     Spacer(minLength: 4)
                     TimelineView(.periodic(from: .now, by: 30)) { _ in
                         Text(Self.relative(session.statusSince)).font(.caption).foregroundStyle(.secondary)
@@ -181,6 +182,20 @@ struct SourceBadge: View {
             .font(.caption2.weight(.medium))
             .padding(.horizontal, 5).padding(.vertical, 1)
             .background(.quaternary, in: Capsule())
+    }
+}
+
+/// Marks agents running on an ssh host.
+struct HostBadge: View {
+    let host: String
+
+    var body: some View {
+        Label(host, systemImage: "network")
+            .font(.caption2.weight(.medium))
+            .lineLimit(1)
+            .padding(.horizontal, 5).padding(.vertical, 1)
+            .foregroundStyle(.teal)
+            .background(.teal.opacity(0.15), in: Capsule())
     }
 }
 
