@@ -153,7 +153,7 @@ enum RemoteSetup {
                 let trusted = try await Task.detached {
                     try CodexTrust.trustLookoutHooks(
                         hooksFile: result.codexHooksFile, home: result.home, executable: "/usr/bin/ssh",
-                        arguments: RemoteHosts.sshArguments(host, command: #"exec "$SHELL" -lc 'codex app-server'"#))
+                        arguments: RemoteHosts.sshArguments(host, command: codexAppServer))
                 }.value
                 lines.append(trusted > 0 ? "✅ \(host): Codex hooks trusted" : "✅ \(host): Codex hooks already trusted")
             } catch {
@@ -162,6 +162,14 @@ enum RemoteSetup {
         }
         return lines
     }
+
+    /// Starts `codex app-server` on the host. Login shells often lack the PATH that `.zshrc`/`.bashrc`
+    /// add, so also look in common install folders and the VS Code extension's bundled codex.
+    static let codexAppServer = #"""
+        exec "$SHELL" -lc 'command -v codex >/dev/null 2>&1 || PATH="$HOME/.local/bin:$HOME/.npm-global/bin:/usr/local/bin:$PATH"
+        command -v codex >/dev/null 2>&1 || { c=$(find "$HOME/.vscode-server/extensions" -path "*/openai.chatgpt-*/bin/*/codex" -type f 2>/dev/null | tail -1); [ -n "$c" ] && PATH="${c%/codex}:$PATH"; }
+        exec codex app-server'
+        """#
 
     static func uninstall(host: String) async throws {
         _ = try await RemoteHosts.run(host, "~/.lookout/bin/lookout-hook --uninstall")
