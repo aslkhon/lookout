@@ -8,10 +8,15 @@ struct RemoteProtocolTests {
     }
 
     @Test func parsesHello() {
-        guard case .hello(let home)? = parse(#"{"type": "hello", "version": 1, "home": "/home/dev"}"#) else {
+        guard case .hello(let home, let sha)? = parse(#"{"type": "hello", "version": 1, "home": "/home/dev", "sha256": "ab12"}"#) else {
             Issue.record("not a hello"); return
         }
         #expect(home == "/home/dev")
+        #expect(sha == "ab12")
+        // Helpers from before self-updating send no hash.
+        guard case .hello(_, nil)? = parse(#"{"type": "hello", "version": 1, "home": "/home/dev"}"#) else {
+            Issue.record("old hello not parsed"); return
+        }
     }
 
     @Test func eventsAreTaggedWithHost() {

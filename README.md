@@ -53,7 +53,8 @@ Adding a host uploads one script to `~/.lookout/bin/lookout-hook` on the server 
 to `~/.claude/settings.json` and `~/.codex/hooks.json` there (with backups, as on the Mac). Lookout
 then keeps one ssh connection open per host running `lookout-hook --watch`, which streams hook
 events and the list of running agents. Nothing listens on a port, and the server never connects back.
-**Remove** takes the hooks out again.
+When Lookout updates, it replaces an outdated helper on the next connection. **Remove** takes the
+hooks out again.
 
 Clicking a remote agent:
 

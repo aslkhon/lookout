@@ -12,6 +12,7 @@ Standard library only; works with Python 3.6+.
 """
 import datetime
 import glob
+import hashlib
 import json
 import os
 import sys
@@ -268,7 +269,9 @@ def watch():
     events = open(EVENTS, "rb")
     events.seek(0, os.SEEK_END)
     partial = b""
-    emit({"type": "hello", "version": VERSION, "home": HOME})
+    with open(os.path.realpath(__file__), "rb") as f:
+        sha256 = hashlib.sha256(f.read()).hexdigest()  # lets Lookout replace an outdated helper
+    emit({"type": "hello", "version": VERSION, "home": HOME, "sha256": sha256})
     next_snapshot = 0.0
     while True:
         if os.path.getsize(EVENTS) < events.tell():  # rotated by a hook

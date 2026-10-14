@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import LookoutCore
 
@@ -15,6 +16,8 @@ final class RemoteHosts: ObservableObject {
     @Published private(set) var states: [String: State] = [:]
 
     private var connections: [String: Connection] = [:]
+    /// Hosts whose outdated helper was already reinstalled this launch (to never loop on failure).
+    private var updated: Set<String> = []
     private let defaultsKey = "remoteHosts"
     var onMessage: ((String, RemoteMessage) -> Void)?
 
@@ -54,7 +57,10 @@ final class RemoteHosts: ObservableObject {
     private func handle(host: String, _ event: Connection.Event) {
         switch event {
         case .message(let message):
-            if case .hello = message { states[host] = .connected }
+            if case .hello(_, let sha256) = message {
+                states[host] = .connected
+                updateIfOutdated(host, remoteSHA256: sha256)
+            }
             onMessage?(host, message)
         case .exited(let error):
             guard let connection = connections[host], !connection.stopped else { return }
@@ -67,6 +73,28 @@ final class RemoteHosts: ObservableObject {
             }
         }
     }
+
+    /// After Lookout itself updates, servers still run the old helper: reinstall it, as Setup's
+    /// Reinstall does, and reconnect.
+    private func updateIfOutdated(_ host: String, remoteSHA256: String?) {
+        guard let bundled = Self.bundledHelperSHA256, remoteSHA256 != bundled,
+              !updated.contains(host) else { return }
+        updated.insert(host)
+        Task {
+            do {
+                _ = try await RemoteSetup.install(host: host)
+                if hosts.contains(host) { connect(host) }
+            } catch {
+                NSLog("Lookout: couldn't update the helper on \(host): \(error.localizedDescription)")
+            }
+        }
+    }
+
+    static let bundledHelperSHA256: String? = {
+        guard let url = Bundle.main.url(forResource: "remote-lookout-hook", withExtension: nil),
+              let data = try? Data(contentsOf: url) else { return nil }
+        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }()
 
     // MARK: ssh
 

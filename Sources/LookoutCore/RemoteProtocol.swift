@@ -2,7 +2,8 @@ import Foundation
 
 /// Lines printed by `lookout-hook --watch` on a server (see Remote/lookout-hook).
 public enum RemoteMessage: Sendable {
-    case hello(home: String)
+    /// `sha256` of the helper script itself; nil from helpers older than Lookout 0.1.4.
+    case hello(home: String, sha256: String?)
     case event(HookEnvelope)
     /// Running agents, and every agent PID still alive (including ones only known from hooks).
     case agents([DiscoveredAgent], alive: Set<Int32>)
@@ -11,7 +12,7 @@ public enum RemoteMessage: Sendable {
         guard let head = try? JSONDecoder().decode(Head.self, from: line) else { return nil }
         switch head.type {
         case "hello":
-            return (try? JSONDecoder().decode(Hello.self, from: line)).map { .hello(home: $0.home) }
+            return (try? JSONDecoder().decode(Hello.self, from: line)).map { .hello(home: $0.home, sha256: $0.sha256) }
         case "event":
             guard var envelope = (try? JSONDecoder().decode(Event.self, from: line))?.envelope else { return nil }
             envelope.host = host
@@ -25,7 +26,10 @@ public enum RemoteMessage: Sendable {
     }
 
     private struct Head: Decodable { var type: String }
-    private struct Hello: Decodable { var home: String }
+    private struct Hello: Decodable {
+        var home: String
+        var sha256: String?
+    }
     private struct Event: Decodable { var envelope: HookEnvelope }
     private struct Snapshot: Decodable {
         var agents: [Record]
