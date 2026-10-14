@@ -212,6 +212,7 @@ struct AgentDetailView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Details").font(.caption.weight(.semibold)).foregroundStyle(.secondary).textCase(.uppercase)
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 8) {
+                row("Name", session.name)
                 row("Host", session.host)
                 row("Directory", session.cwd)
                 row("App", hostName ?? session.hostBundleID)

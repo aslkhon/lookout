@@ -34,6 +34,8 @@ public struct AgentSession: Identifiable, Sendable, Equatable {
     public var detail: String?
     /// The last prompt the user submitted, as a title for the session.
     public var lastPrompt: String?
+    /// The agent's own name for the session (Codex thread name).
+    public var name: String?
     public var agentPID: Int32?
     public var tty: String?
     public var termProgram: String?
@@ -74,6 +76,7 @@ public enum SessionReducer {
         s.ancestors = ctx.ancestors ?? s.ancestors
         s.term = ctx.term ?? s.term
         s.sshClientPort = ctx.sshClientPort ?? s.sshClientPort
+        s.name = ctx.sessionName ?? s.name
         s.lastEventAt = now
         if let prompt = p.prompt, !prompt.isEmpty { s.lastPrompt = prompt }
 

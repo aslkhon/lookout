@@ -43,6 +43,8 @@ public struct HookContext: Codable, Sendable {
     public var term: String?
     /// Source port of the ssh connection (from `$SSH_CONNECTION`), identifying the local `ssh` process.
     public var sshClientPort: Int?
+    /// Codex thread name, looked up on the server.
+    public var sessionName: String?
 
     public init(agentPID: Int32? = nil, tty: String? = nil, termProgram: String? = nil,
                 hostBundleID: String? = nil, timestamp: Double = Date().timeIntervalSince1970,

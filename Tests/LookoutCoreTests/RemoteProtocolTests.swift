@@ -48,3 +48,30 @@ struct RemoteProtocolTests {
         #expect(local.placeholderKey != remote.placeholderKey)
     }
 }
+
+struct CodexSessionIndexTests {
+    let index = Data("""
+        {"id":"a","thread_name":"Calculate average LUFS","updated_at":"2026-03-05T06:07:08Z"}
+        {"id":"b","thread_name":"Explain last commit","updated_at":"2026-03-05T06:07:08Z"}
+        {"id":"a","thread_name":"Renamed thread","updated_at":"2026-03-06T06:07:08Z"}
+        {"id":"c","thread_name":"  ","updated_at":"2026-03-06T06:07:08Z"}
+        not json
+        """.utf8)
+
+    @Test func latestNameWins() {
+        #expect(CodexSessionIndex.name(for: "a", index: index) == "Renamed thread")
+        #expect(CodexSessionIndex.name(for: "b", index: index) == "Explain last commit")
+    }
+
+    @Test func blankOrMissing() {
+        #expect(CodexSessionIndex.name(for: "c", index: index) == nil)
+        #expect(CodexSessionIndex.name(for: "zzz", index: index) == nil)
+    }
+
+    @Test func remoteNameReachesSession() {
+        var envelope = HookEnvelope(source: .codex, context: HookContext(agentPID: 1),
+                                    payload: HookPayload(sessionID: "a", hookEventName: "Stop"))
+        envelope.context.sessionName = "Review logs"
+        #expect(SessionReducer.apply(envelope, to: nil).name == "Review logs")
+    }
+}

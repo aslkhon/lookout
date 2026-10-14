@@ -156,8 +156,8 @@ struct SessionSummary: View {
                     }
                 }
                 .font(.callout).foregroundStyle(.secondary).lineLimit(2)
-                if let prompt = session.lastPrompt {
-                    Text(prompt).font(.caption).foregroundStyle(.tertiary).lineLimit(1)
+                if let title = session.name ?? session.lastPrompt {
+                    Text(title).font(.caption).foregroundStyle(.tertiary).lineLimit(1)
                 }
             }
             HostIcon(bundleID: session.hostBundleID).padding(.top, 2)

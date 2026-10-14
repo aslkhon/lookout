@@ -71,7 +71,11 @@ final class AppModel: ObservableObject {
             AgentSession.key(source: envelope.source, sessionID: "pid:\($0)", host: envelope.host)
         }
         let old = sessions[key] ?? placeholder.flatMap { sessions.removeValue(forKey: $0) }
-        let new = SessionReducer.apply(envelope, to: old)
+        var new = SessionReducer.apply(envelope, to: old)
+        if envelope.source == .codex, envelope.host == nil,
+           let name = CodexSessionIndex.name(for: envelope.payload.sessionID) {
+            new.name = name // remote hooks look this up on the server
+        }
         sessions[key] = new
         log.debug("\(key, privacy: .public) \(envelope.payload.hookEventName, privacy: .public) → \(new.status.rawValue, privacy: .public) pid=\(new.agentPID.map(String.init) ?? "nil", privacy: .public)")
         if SessionReducer.shouldNotify(from: old?.status, to: new.status) {
