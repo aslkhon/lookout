@@ -17,8 +17,11 @@ enum Focuser {
     static func focus(_ session: AgentSession) {
         guard let bundleID = session.hostBundleID else { return }
         if bundleID == ghosttyID, focusGhostty(cwd: session.cwd) { return }
-        if let support = vscodeFamily[bundleID], let folder = vscodeWindowFolder(containing: session.cwd, support: support) {
-            open(folder: folder, bundleID: bundleID)
+        if let support = vscodeFamily[bundleID], let window = vscodeWindow(containing: session.cwd, support: support) {
+            switch window {
+            case .folder(let folder): open(folder: folder, bundleID: bundleID)
+            case .workspace(let config): openWorkspace(config, bundleID: bundleID)
+            }
             return
         }
         activate(bundleID: bundleID)
@@ -76,8 +79,15 @@ enum Focuser {
 
     // MARK: VS Code family
 
-    /// Finds the open window folder that contains `cwd`, from VS Code's persisted window state.
-    static func vscodeWindowFolder(containing cwd: String, support: String) -> URL? {
+    enum VSCodeWindow: Equatable {
+        case folder(URL)
+        /// Multi-root workspace window, identified by its config file.
+        case workspace(URL)
+    }
+
+    /// Finds the open window whose folder (or one of whose workspace folders) contains `cwd`,
+    /// from VS Code's persisted window state.
+    static func vscodeWindow(containing cwd: String, support: String) -> VSCodeWindow? {
         let storage = LookoutPaths.home
             .appendingPathComponent("Library/Application Support/\(support)/User/globalStorage/storage.json")
         guard let data = FileManager.default.contents(atPath: storage.path),
@@ -86,18 +96,64 @@ enum Focuser {
 
         var windows = state["openedWindows"] as? [[String: Any]] ?? []
         if let last = state["lastActiveWindow"] as? [String: Any] { windows.append(last) }
-        let folders = windows.compactMap { ($0["folder"] as? String).flatMap(URL.init(string:)) }.filter(\.isFileURL)
+
+        // (folder path, window) for every local folder shown in an open window.
+        var candidates: [(String, VSCodeWindow)] = []
+        for window in windows {
+            if let folder = (window["folder"] as? String).flatMap(URL.init(string:)), folder.isFileURL {
+                candidates.append((folder.path, .folder(folder)))
+            }
+            if let ws = window["workspaceIdentifier"] as? [String: Any],
+               let config = (ws["configURIPath"] as? String).flatMap(URL.init(string:)), config.isFileURL {
+                candidates += workspaceFolders(config).map { ($0, .workspace(config)) }
+            }
+        }
 
         let target = normalize(cwd)
-        return folders
-            .filter { let f = normalize($0.path); return target == f || target.hasPrefix(f + "/") }
-            .max { $0.path.count < $1.path.count }
+        return candidates
+            .filter { let f = normalize($0.0); return target == f || target.hasPrefix(f + "/") }
+            .max { $0.0.count < $1.0.count }?.1
+    }
+
+    /// Local folder paths listed in a workspace config (JSON with comments; paths may be relative).
+    static func workspaceFolders(_ config: URL) -> [String] {
+        guard let data = FileManager.default.contents(atPath: config.path),
+              let root = try? JSONSerialization.jsonObject(with: data, options: .json5Allowed) as? [String: Any],
+              let folders = root["folders"] as? [[String: Any]] else { return [] }
+        let base = config.deletingLastPathComponent()
+        return folders.compactMap { folder in
+            if let path = folder["path"] as? String {
+                return path.hasPrefix("/") ? path : base.appendingPathComponent(path).standardizedFileURL.path
+            }
+            if let uri = (folder["uri"] as? String).flatMap(URL.init(string:)), uri.isFileURL { return uri.path }
+            return nil
+        }
     }
 
     /// Opening an already-open folder makes VS Code focus that window.
     static func open(folder: URL, bundleID: String) {
         guard let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else { return }
         NSWorkspace.shared.open([folder], withApplicationAt: appURL, configuration: NSWorkspace.OpenConfiguration())
+    }
+
+    /// Workspace windows must be opened through the app's own CLI: VS Code treats files opened via
+    /// macOS (Finder/NSWorkspace) as plain files, but recognizes workspace configs passed on the
+    /// command line, focusing the window that already has the workspace open.
+    static func openWorkspace(_ config: URL, bundleID: String) {
+        guard let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else { return }
+        let binDir = appURL.appendingPathComponent("Contents/Resources/app/bin")
+        let cli = (try? FileManager.default.contentsOfDirectory(atPath: binDir.path))?
+            .filter { !$0.contains("tunnel") }.sorted().first
+        guard let cli else { return activate(bundleID: bundleID) }
+        let process = Process()
+        process.executableURL = binDir.appendingPathComponent(cli)
+        process.arguments = [config.path]
+        var env = ProcessInfo.processInfo.environment
+        env["VSCODE_IPC_HOOK_CLI"] = nil // talk to the main app, not a terminal's window
+        process.environment = env
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do { try process.run() } catch { activate(bundleID: bundleID) }
     }
 
     // MARK: Fallback
