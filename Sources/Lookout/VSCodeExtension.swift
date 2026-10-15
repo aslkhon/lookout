@@ -27,6 +27,13 @@ enum VSCodeExtension {
         installedFolders(bundleID: bundleID).contains { $0.hasPrefix(id + "-") }
     }
 
+    /// Version of the installed extension, if any.
+    static func installedVersion(bundleID: String) -> String? {
+        installedFolders(bundleID: bundleID).filter { $0.hasPrefix(id + "-") }
+            .map { String($0.dropFirst(id.count + 1)) }
+            .max { $0.compare($1, options: .numeric) == .orderedAscending }
+    }
+
     /// Installed, but not the version bundled with this Lookout.
     static func isOutdated(bundleID: String) -> Bool {
         isInstalled(bundleID: bundleID) && !installedFolders(bundleID: bundleID).contains("\(id)-\(version)")

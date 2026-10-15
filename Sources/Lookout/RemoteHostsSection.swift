@@ -1,83 +1,184 @@
 import LookoutCore
 import SwiftUI
 
-/// Setup section for ssh hosts: add (installs the helper and hooks on the host), status, remove.
+/// Setup section for ssh hosts: status of each host's helper and hooks, add/reinstall/remove.
 struct RemoteHostsSection: View {
     @ObservedObject var model: AppModel
     @ObservedObject var remotes: RemoteHosts
 
     @State private var newHost = ""
     @State private var busyHost: String?
-    @State private var log: [String] = []
+    @State private var messages: [String: [String]] = [:]
 
     private let configHosts = RemoteSetup.sshConfigHosts()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Remote Hosts").font(.body.weight(.medium))
-            Text("Watch agents on servers over ssh. Needs key-based login (no password prompt) and python3 on the server.")
-                .font(.caption).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            ForEach(remotes.hosts, id: \.self) { host in
-                HStack(spacing: 8) {
-                    Circle().fill(color(remotes.states[host])).frame(width: 8, height: 8)
-                    Text(host).font(.callout.weight(.medium))
-                    Text(label(remotes.states[host])).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                    Spacer()
-                    if busyHost == host {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Button("Reinstall") { Task { await install(host) } }.controlSize(.small)
-                        Button("Remove") { Task { await remove(host) } }.controlSize(.small)
-                    }
+            HStack(spacing: 8) {
+                SectionTitle(title: "Remote hosts")
+                Text("One ssh connection per host, nothing listening. Needs key-based login and python3.")
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+            VStack(spacing: 0) {
+                ForEach(remotes.hosts, id: \.self) { host in
+                    hostRow(host)
+                    Divider()
+                }
+                addRow
+                if let lines = messages[""] {
+                    messageLines(lines).padding(.horizontal, 14).padding(.bottom, 10)
                 }
             }
+            .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.primary.opacity(0.08)))
+        }
+    }
 
-            HStack {
-                TextField("ssh host, e.g. myserver", text: $newHost)
-                    .textFieldStyle(.roundedBorder)
-                    .onSubmit { Task { await add() } }
-                if !configHosts.isEmpty {
-                    Menu {
-                        ForEach(configHosts.filter { !remotes.hosts.contains($0) }, id: \.self) { host in
-                            Button(host) { newHost = host }
-                        }
-                    } label: {
-                        Image(systemName: "list.bullet")
+    private func hostRow(_ host: String) -> some View {
+        let state = remotes.states[host]
+        let agents = model.sessions.values.filter { $0.host == host && $0.status != .ended }.count
+        let failure: (title: String, hint: String?)? = if case .failed(let error) = state {
+            Self.explain(error, host: host)
+        } else {
+            nil
+        }
+        return HStack(alignment: .center, spacing: 12) {
+            Circle().fill(state.color).frame(width: 8, height: 8).frame(width: 18)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text(host).fontWeight(.semibold)
+                    switch state {
+                    case .connected: Text("Connected · \(agents) agent\(agents == 1 ? "" : "s")").foregroundStyle(.secondary)
+                    case .connecting, nil: Text("Connecting…").foregroundStyle(.secondary)
+                    case .failed: Text("Can't connect · \(failure?.title ?? "")").foregroundStyle(.red)
                     }
-                    .menuStyle(.borderlessButton)
-                    .fixedSize()
-                    .help("Hosts from ~/.ssh/config")
                 }
-                Button("Add") { Task { await add() } }
-                    .disabled(newHost.trimmingCharacters(in: .whitespaces).isEmpty || busyHost != nil)
+                .font(.callout)
+                .lineLimit(1)
+                if let hint = failure?.hint {
+                    Text(.init(hint)).font(.callout).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if state == .connected, let hello = remotes.hellos[host] {
+                    chips(hello)
+                }
+                if let lines = messages[host] { messageLines(lines) }
             }
-
-            ForEach(Array(log.enumerated()), id: \.offset) { _, line in
-                Text(line).font(.caption).lineLimit(2)
+            Spacer(minLength: 8)
+            if busyHost == host {
+                ProgressView().controlSize(.small)
+            } else {
+                if failure != nil {
+                    Button("Retry") { remotes.connect(host) }
+                } else {
+                    Button("Reinstall") { Task { await install(host) } }
+                }
+                Button("Remove") { Task { await remove(host) } }
             }
         }
+        .padding(.horizontal, 14).padding(.vertical, 11)
+    }
+
+    private func chips(_ hello: RemoteHello) -> some View {
+        HStack(spacing: 5) {
+            if let hooks = hello.hooks {
+                hookChip("Claude Code hooks", installed: hooks["claude"] ?? false)
+                hookChip("Codex hooks", installed: hooks["codex"] ?? false)
+            }
+            if hello.sha256 == RemoteHosts.bundledHelperSHA256 {
+                Chip(text: "helper up to date")
+            } else {
+                Chip(text: "helper updating…")
+            }
+        }
+    }
+
+    private func hookChip(_ title: String, installed: Bool) -> some View {
+        installed ? Chip(text: title, style: .success, systemImage: "checkmark")
+                  : Chip(text: "no \(title)", systemImage: "minus")
+    }
+
+    private var addRow: some View {
+        HStack {
+            TextField("Add a host from ~/.ssh/config or user@server", text: $newHost)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit { Task { await add() } }
+            if !configHosts.filter({ !remotes.hosts.contains($0) }).isEmpty {
+                Menu {
+                    ForEach(configHosts.filter { !remotes.hosts.contains($0) }, id: \.self) { host in
+                        Button(host) { newHost = host }
+                    }
+                } label: {
+                    Image(systemName: "chevron.down")
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("Hosts from ~/.ssh/config")
+            }
+            if busyHost != nil && !remotes.hosts.contains(busyHost ?? "") {
+                ProgressView().controlSize(.small)
+            }
+            Button("Add") { Task { await add() } }
+                .buttonStyle(.borderedProminent)
+                .disabled(newHost.trimmingCharacters(in: .whitespaces).isEmpty || busyHost != nil)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 11)
+    }
+
+    private func messageLines(_ lines: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                Text(line).font(.caption).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    /// A short reason and what to do about it, from ssh's last stderr line.
+    static func explain(_ error: String, host: String) -> (title: String, hint: String?) {
+        let e = error.lowercased()
+        if e.contains("permission denied") {
+            return ("ssh asked for a password",
+                    "Add your key with `ssh-copy-id \(host)`, then retry. Agents there stay hidden until it connects.")
+        }
+        if e.contains("could not resolve hostname") {
+            return ("unknown host", "Check the name, or add it to ~/.ssh/config.")
+        }
+        if e.contains("host key verification failed") || e.contains("remote host identification has changed") {
+            return ("host key changed", "Run `ssh \(host)` in a terminal to review the new key.")
+        }
+        if e.contains("timed out") || e.contains("connection refused") || e.contains("no route to host")
+            || e.contains("network is unreachable") {
+            return ("server unreachable", "Lookout keeps retrying in the background.")
+        }
+        if e.contains("lookout-hook") && e.contains("no such file") {
+            return ("helper not installed", "Click Reinstall to set it up again.")
+        }
+        return (error, nil)
     }
 
     private func add() async {
         let host = newHost.trimmingCharacters(in: .whitespaces)
         guard !host.isEmpty else { return }
-        if await install(host) { newHost = "" }
+        if await install(host, key: "") { newHost = "" }
     }
 
     @discardableResult
-    private func install(_ host: String) async -> Bool {
+    private func install(_ host: String, key: String? = nil) async -> Bool {
+        let key = key ?? host
         busyHost = host
-        log = ["Installing on \(host)…"]
+        messages[key] = ["Installing on \(host)…"]
         defer { busyHost = nil }
         do {
-            log = try await RemoteSetup.install(host: host)
+            let lines = try await RemoteSetup.install(host: host)
             remotes.add(host)
             remotes.connect(host)
+            messages[key] = nil
+            // Only keep lines worth reading: errors and warnings.
+            let notable = lines.filter { !$0.hasPrefix("✅") }
+            if !notable.isEmpty { messages[host] = notable }
             return true
         } catch {
-            log = ["❌ \(host): \(error.localizedDescription)"]
+            messages[key] = ["❌ \(host): \(error.localizedDescription)"]
             return false
         }
     }
@@ -87,27 +188,12 @@ struct RemoteHostsSection: View {
         defer { busyHost = nil }
         do {
             try await RemoteSetup.uninstall(host: host)
-            log = ["Removed Lookout's hooks from \(host)"]
+            messages[""] = ["Removed Lookout's hooks from \(host)"]
         } catch {
-            log = ["⚠️ Couldn't remove hooks from \(host) (\(error.localizedDescription)). Stopped watching it anyway."]
+            messages[""] = ["⚠️ Couldn't remove hooks from \(host) (\(error.localizedDescription)). Stopped watching it anyway."]
         }
+        messages[host] = nil
         model.removeHost(host)
-    }
-
-    private func color(_ state: RemoteHosts.State?) -> Color {
-        switch state {
-        case .connected: .green
-        case .connecting, nil: .yellow
-        case .failed: .red
-        }
-    }
-
-    private func label(_ state: RemoteHosts.State?) -> String {
-        switch state {
-        case .connected: "Connected"
-        case .connecting, nil: "Connecting…"
-        case .failed(let message): message
-        }
     }
 }
 

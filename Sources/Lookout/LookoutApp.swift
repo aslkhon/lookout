@@ -42,7 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             window.title = "Lookout Setup"
             window.isReleasedWhenClosed = false
             let hosting = NSHostingController(
-                rootView: SetupView(model: AppModel.shared, close: { [weak window] in window?.close() }))
+                rootView: SetupView(model: AppModel.shared, remotes: AppModel.shared.remotes, close: { [weak window] in window?.close() }))
             hosting.sizingOptions = [] // fixed-size window; avoids a constraint-update loop
             window.contentViewController = hosting
             window.setContentSize(SetupView.size)
@@ -62,7 +62,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             window.isReleasedWhenClosed = false
             window.toolbarStyle = .unified
             let hosting = NSHostingController(
-                rootView: DashboardView(model: AppModel.shared, openSetup: { [weak self] in self?.showSetup() }))
+                rootView: DashboardView(model: AppModel.shared, remotes: AppModel.shared.remotes, openSetup: { [weak self] in self?.showSetup() }))
             hosting.sizingOptions = [] // window size is user-controlled
             window.contentViewController = hosting
             window.setContentSize(NSSize(width: 980, height: 600))

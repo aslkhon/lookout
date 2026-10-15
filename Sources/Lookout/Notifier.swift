@@ -43,6 +43,19 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         center.add(UNNotificationRequest(identifier: session.id, content: content, trigger: nil))
     }
 
+    func isAuthorized() async -> Bool {
+        let status = await center.notificationSettings().authorizationStatus
+        return status == .authorized || status == .provisional
+    }
+
+    func postTest() {
+        let content = UNMutableNotificationContent()
+        content.title = "Lookout notifications work"
+        content.body = "You'll hear from Lookout when an agent needs approval, asks a question or finishes."
+        content.sound = .default
+        center.add(UNNotificationRequest(identifier: "lookout-test", content: content, trigger: nil))
+    }
+
     func clear(sessionID: String) {
         center.removeDeliveredNotifications(withIdentifiers: [sessionID])
     }

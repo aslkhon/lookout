@@ -1,9 +1,17 @@
 import Foundation
 
+/// First line from a server's helper.
+public struct RemoteHello: Decodable, Sendable, Equatable {
+    public var home: String
+    /// `sha256` of the helper script itself; nil from helpers older than Lookout 0.1.4.
+    public var sha256: String?
+    /// Whether Lookout's hooks are in the server's Claude Code / Codex configs (helpers ≥ 0.1.5).
+    public var hooks: [String: Bool]?
+}
+
 /// Lines printed by `lookout-hook --watch` on a server (see Remote/lookout-hook).
 public enum RemoteMessage: Sendable {
-    /// `sha256` of the helper script itself; nil from helpers older than Lookout 0.1.4.
-    case hello(home: String, sha256: String?)
+    case hello(RemoteHello)
     case event(HookEnvelope)
     /// Running agents, and every agent PID still alive (including ones only known from hooks).
     case agents([DiscoveredAgent], alive: Set<Int32>)
@@ -12,7 +20,7 @@ public enum RemoteMessage: Sendable {
         guard let head = try? JSONDecoder().decode(Head.self, from: line) else { return nil }
         switch head.type {
         case "hello":
-            return (try? JSONDecoder().decode(Hello.self, from: line)).map { .hello(home: $0.home, sha256: $0.sha256) }
+            return (try? JSONDecoder().decode(RemoteHello.self, from: line)).map { .hello($0) }
         case "event":
             guard var envelope = (try? JSONDecoder().decode(Event.self, from: line))?.envelope else { return nil }
             envelope.host = host
@@ -26,10 +34,7 @@ public enum RemoteMessage: Sendable {
     }
 
     private struct Head: Decodable { var type: String }
-    private struct Hello: Decodable {
-        var home: String
-        var sha256: String?
-    }
+
     private struct Event: Decodable { var envelope: HookEnvelope }
     private struct Snapshot: Decodable {
         var agents: [Record]
@@ -52,6 +57,8 @@ public enum RemoteMessage: Sendable {
         var term: String?
         var termProgram: String?
         var sshClientPort: Int?
+        var branch: String?
+        var startedAt: Double?
 
         func agent(host: String) -> DiscoveredAgent? {
             var agent: DiscoveredAgent
@@ -70,6 +77,8 @@ public enum RemoteMessage: Sendable {
             agent.term = term
             agent.termProgram = termProgram
             agent.sshClientPort = sshClientPort
+            agent.branch = branch
+            agent.startedAt = startedAt.map { Date(timeIntervalSince1970: $0) }
             return agent
         }
     }

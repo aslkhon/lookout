@@ -20,6 +20,9 @@ public struct DiscoveredAgent: Equatable, Sendable {
     public var term: String?
     public var termProgram: String?
     public var sshClientPort: Int?
+    public var name: String?
+    public var branch: String?
+    public var startedAt: Date?
 
     public init(source: AgentSource, host: String? = nil, pid: Int32, sessionID: String? = nil, cwd: String,
                 status: AgentStatus? = nil, statusSince: Date? = nil, detail: String? = nil, tty: String? = nil,
@@ -68,11 +71,13 @@ public enum AgentDiscovery {
 
     static func agent(from file: ClaudeSessionFile, tty: String?, hostBundleID: String?) -> DiscoveredAgent {
         let (status, waiting) = claudeStatus(file.status, waitingFor: file.waitingFor)
-        let detail = waiting ?? file.name.map { file.kind == "bg" ? "Background · \($0)" : $0 }
-        return DiscoveredAgent(
+        let detail = waiting ?? (file.kind == "bg" ? "Background" : nil)
+        var agent = DiscoveredAgent(
             source: .claude, pid: file.pid, sessionID: file.sessionId, cwd: file.cwd,
             status: status, statusSince: file.statusUpdatedAt.map { Date(timeIntervalSince1970: $0 / 1000) },
             detail: detail, tty: tty, hostBundleID: hostBundleID)
+        agent.name = file.name
+        return agent
     }
 
     /// Claude's session status is "busy", "idle", or "waiting" (a permission/question dialog is open).
@@ -97,9 +102,11 @@ public enum AgentDiscovery {
             guard let info = ProcessInspector.info(pid), info.comm == "codex",
                   let tty = ProcessInspector.tty(info),
                   let cwd = ProcessInspector.cwd(pid) else { return nil }
-            return DiscoveredAgent(source: .codex, pid: pid, sessionID: nil, cwd: cwd, status: nil,
-                                   detail: nil, tty: tty,
-                                   hostBundleID: ProcessInspector.hostBundleID(of: pid))
+            var agent = DiscoveredAgent(source: .codex, pid: pid, sessionID: nil, cwd: cwd, status: nil,
+                                        detail: nil, tty: tty,
+                                        hostBundleID: ProcessInspector.hostBundleID(of: pid))
+            agent.startedAt = info.startedAt
+            return agent
         }
     }
 }
@@ -107,9 +114,10 @@ public enum AgentDiscovery {
 extension SessionReducer {
     /// Session state for an agent found by scanning. Only used for sessions without hook events.
     public static func apply(_ agent: DiscoveredAgent, to existing: AgentSession?, now: Date = Date()) -> AgentSession {
+        // Without a status time, an agent found idle has been idle at most since it started.
         var s = existing ?? AgentSession(
             source: agent.source, host: agent.host, sessionID: agent.sessionID ?? "pid:\(agent.pid)", cwd: agent.cwd,
-            status: .idle, statusSince: agent.statusSince ?? now, lastEventAt: now)
+            status: .idle, statusSince: agent.statusSince ?? agent.startedAt ?? now, lastEventAt: now)
         let status = agent.status ?? .idle
         if status != s.status { s.statusSince = agent.statusSince ?? now }
         s.status = status
@@ -122,6 +130,9 @@ extension SessionReducer {
         s.term = agent.term ?? s.term
         s.termProgram = agent.termProgram ?? s.termProgram
         s.sshClientPort = agent.sshClientPort ?? s.sshClientPort
+        s.name = agent.name ?? s.name
+        s.branch = agent.branch ?? s.branch
+        s.startedAt = agent.startedAt ?? s.startedAt
         return s
     }
 }

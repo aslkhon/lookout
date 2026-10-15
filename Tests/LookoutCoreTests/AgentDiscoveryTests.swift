@@ -17,7 +17,8 @@ struct AgentDiscoveryTests {
         let agent = AgentDiscovery.agent(from: file, tty: "/dev/ttys004", hostBundleID: "com.mitchellh.ghostty")
         #expect(agent.sessionID == "abc")
         #expect(agent.status == .idle)
-        #expect(agent.detail == "daftar-3f")
+        #expect(agent.name == "daftar-3f")
+        #expect(agent.detail == nil)
         #expect(agent.statusSince == Date(timeIntervalSince1970: 1792004478))
     }
 

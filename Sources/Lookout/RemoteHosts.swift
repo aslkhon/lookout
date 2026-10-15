@@ -14,6 +14,8 @@ final class RemoteHosts: ObservableObject {
 
     @Published private(set) var hosts: [String]
     @Published private(set) var states: [String: State] = [:]
+    /// What each host's helper reported when it last connected.
+    @Published private(set) var hellos: [String: RemoteHello] = [:]
 
     private var connections: [String: Connection] = [:]
     /// Hosts whose outdated helper was already reinstalled this launch (to never loop on failure).
@@ -57,9 +59,10 @@ final class RemoteHosts: ObservableObject {
     private func handle(host: String, _ event: Connection.Event) {
         switch event {
         case .message(let message):
-            if case .hello(_, let sha256) = message {
+            if case .hello(let hello) = message {
                 states[host] = .connected
-                updateIfOutdated(host, remoteSHA256: sha256)
+                hellos[host] = hello
+                updateIfOutdated(host, remoteSHA256: hello.sha256)
             }
             onMessage?(host, message)
         case .exited(let error):

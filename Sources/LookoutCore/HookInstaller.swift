@@ -51,6 +51,13 @@ public struct HookInstaller {
         }
     }
 
+    /// Number of Lookout hook entries in the agent's config.
+    public func entryCount(_ source: AgentSource) -> Int {
+        guard let root = try? readJSON(configURL(for: source)),
+              let hooks = root["hooks"] as? [String: Any] else { return 0 }
+        return hooks.values.reduce(0) { $0 + Self.commands(in: $1).filter { $0.contains(Self.marker) }.count }
+    }
+
     public func install(_ source: AgentSource) throws {
         let url = configURL(for: source)
         var root = try readJSON(url)

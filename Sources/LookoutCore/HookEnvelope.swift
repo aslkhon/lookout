@@ -1,6 +1,6 @@
 import Foundation
 
-public enum AgentSource: String, Codable, Sendable {
+public enum AgentSource: String, Codable, Sendable, CaseIterable {
     case claude, codex
 
     public var displayName: String {
@@ -45,6 +45,9 @@ public struct HookContext: Codable, Sendable {
     public var sshClientPort: Int?
     /// Codex thread name, looked up on the server.
     public var sessionName: String?
+    /// Git branch of the agent's directory and the agent's start time, from the server.
+    public var branch: String?
+    public var startedAt: Double?
 
     public init(agentPID: Int32? = nil, tty: String? = nil, termProgram: String? = nil,
                 hostBundleID: String? = nil, timestamp: Double = Date().timeIntervalSince1970,
@@ -101,14 +104,18 @@ public struct HookPayload: Codable, Sendable {
 
     /// Short human description of the tool call, e.g. "Bash: npm test".
     public var toolSummary: String? {
+        toolCall.map { call in call.argument.map { "\(call.name): \($0)" } ?? call.name }
+    }
+
+    public var toolCall: ToolCall? {
         guard let toolName else { return nil }
         let keys = ["command", "file_path", "path", "url", "pattern", "description"]
         for key in keys {
             if case .string(let value)? = toolInput?[key], !value.isEmpty {
-                return "\(toolName): \(value)"
+                return ToolCall(name: toolName, argument: value)
             }
         }
-        return toolName
+        return ToolCall(name: toolName, argument: nil)
     }
 }
 

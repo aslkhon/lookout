@@ -9,6 +9,7 @@ public enum ProcessInspector {
         /// Kernel process name (≤16 chars). Native Claude installs report their version number here.
         public let comm: String
         let tdev: dev_t
+        public let startedAt: Date
     }
 
     public static func info(_ pid: pid_t) -> Info? {
@@ -19,7 +20,9 @@ public enum ProcessInspector {
         let comm = withUnsafeBytes(of: kinfo.kp_proc.p_comm) { raw in
             String(decoding: raw.prefix(while: { $0 != 0 }), as: UTF8.self)
         }
-        return Info(pid: pid, ppid: kinfo.kp_eproc.e_ppid, comm: comm, tdev: kinfo.kp_eproc.e_tdev)
+        let start = kinfo.kp_proc.p_un.__p_starttime
+        return Info(pid: pid, ppid: kinfo.kp_eproc.e_ppid, comm: comm, tdev: kinfo.kp_eproc.e_tdev,
+                    startedAt: Date(timeIntervalSince1970: Double(start.tv_sec) + Double(start.tv_usec) / 1e6))
     }
 
     public static func executablePath(_ pid: pid_t) -> String {

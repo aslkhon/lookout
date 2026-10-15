@@ -105,6 +105,7 @@ final class AppModel: ObservableObject {
 
     private func refresh() {
         checkLiveness()
+        updateLocalDetails()
         Task.detached(priority: .utility) {
             let found = AgentDiscovery.scan()
             await MainActor.run { AppModel.shared.merge(found) }
@@ -140,9 +141,11 @@ final class AppModel: ObservableObject {
             let key = agent.key
             if hookDriven.contains(key) {
                 // Hooks own the status; still pick up process details only a scan knows (remote ancestors).
-                if agent.host != nil, var session = sessions[key], session.ancestors != agent.ancestors {
-                    session.ancestors = agent.ancestors
-                    sessions[key] = session
+                if agent.host != nil, var session = sessions[key] {
+                    session.ancestors = agent.ancestors ?? session.ancestors
+                    session.branch = agent.branch ?? session.branch
+                    session.startedAt = agent.startedAt ?? session.startedAt
+                    if sessions[key] != session { sessions[key] = session }
                 }
                 continue
             }
@@ -154,6 +157,18 @@ final class AppModel: ObservableObject {
             if old != nil, SessionReducer.shouldNotify(from: old?.status, to: new.status) {
                 Notifier.shared.post(for: new)
             }
+        }
+    }
+
+    /// Branch and start time of agents on this Mac (remote ones come from their host's helper).
+    private func updateLocalDetails() {
+        for (key, session) in sessions where session.host == nil && session.status != .ended {
+            var updated = session
+            updated.branch = GitInfo.branch(of: session.cwd)
+            if updated.startedAt == nil, let pid = session.agentPID {
+                updated.startedAt = ProcessInspector.info(pid)?.startedAt
+            }
+            if updated != session { sessions[key] = updated }
         }
     }
 

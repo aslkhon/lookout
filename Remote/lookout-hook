@@ -110,6 +110,47 @@ def find_agent(source):
     return fallback
 
 
+def started_at(pid):
+    """Process start as a Unix timestamp (/proc/<pid>/stat field 22 is in clock ticks since boot)."""
+    try:
+        with open("/proc/%d/stat" % pid, "rb") as f:
+            data = f.read().decode("utf-8", "replace")
+        ticks = int(data[data.rindex(")") + 2:].split()[19])
+        with open("/proc/stat") as f:
+            btime = next(int(line.split()[1]) for line in f if line.startswith("btime "))
+        return btime + ticks / os.sysconf("SC_CLK_TCK")
+    except (OSError, ValueError, IndexError, StopIteration):
+        return None
+
+
+def git_branch(directory):
+    """Branch of the repository containing directory (short commit when detached), from .git/HEAD."""
+    d = directory
+    for _ in range(32):
+        dot_git = os.path.join(d, ".git")
+        if os.path.exists(dot_git):
+            git_dir = dot_git
+            try:
+                if os.path.isfile(dot_git):  # worktree
+                    with open(dot_git) as f:
+                        line = f.readline().strip()
+                    if not line.startswith("gitdir:"):
+                        return None
+                    git_dir = os.path.join(d, line[len("gitdir:"):].strip())
+                with open(os.path.join(git_dir, "HEAD")) as f:
+                    head = f.read().strip()
+            except OSError:
+                return None
+            if head.startswith("ref: refs/heads/"):
+                return head[len("ref: refs/heads/"):]
+            return head[:7] if len(head) >= 7 else None
+        parent = os.path.dirname(d)
+        if not d or parent == d:
+            return None
+        d = parent
+    return None
+
+
 def process_context(pid, env=None):
     """Where an agent runs: its tty, ancestors and the ssh/terminal it came through."""
     env = environ(pid) if env is None else env
@@ -120,6 +161,7 @@ def process_context(pid, env=None):
         "tty": tty if tty.startswith("/dev/") else None,
         "term": env.get("TERM"),
         "termProgram": env.get("TERM_PROGRAM"),
+        "startedAt": started_at(pid),
     }
     parts = env.get("SSH_CONNECTION", "").split()
     if len(parts) == 4 and parts[1].isdigit():
@@ -167,6 +209,8 @@ def hook(source):
     agent = find_agent(source)
     context = process_context(agent, dict(os.environ)) if agent else {}
     context["timestamp"] = time.time()
+    if payload.get("cwd"):
+        context["branch"] = git_branch(payload["cwd"])
     if source == "codex":
         name = codex_session_name(payload.get("session_id"))
         if name:
@@ -208,6 +252,7 @@ def claude_agents():
                   ("sessionId", "cwd", "status", "waitingFor", "kind", "name", "statusUpdatedAt")}
         record.update(process_context(pid))
         record["source"] = "claude"
+        record["branch"] = git_branch(record.get("cwd") or "")
         agents.append(record)
     return agents
 
@@ -226,7 +271,7 @@ def codex_agents():
         if not cwd:
             continue
         record = process_context(pid)
-        record.update({"source": "codex", "cwd": cwd})
+        record.update({"source": "codex", "cwd": cwd, "branch": git_branch(cwd)})
         agents.append(record)
     return agents
 
@@ -254,6 +299,18 @@ def recent_agent_pids():
     return pids
 
 
+def hooks_installed():
+    result = {}
+    for source, path in (("claude", os.path.join(HOME, ".claude", "settings.json")),
+                         ("codex", os.path.join(HOME, ".codex", "hooks.json"))):
+        try:
+            with open(path) as f:
+                result[source] = MARKER in f.read()
+        except OSError:
+            result[source] = False
+    return result
+
+
 def ensure_private():
     """~/.lookout and events.jsonl hold prompts and commands: owner-only, also on older installs."""
     os.makedirs(ROOT, mode=0o700, exist_ok=True)
@@ -271,7 +328,7 @@ def watch():
     partial = b""
     with open(os.path.realpath(__file__), "rb") as f:
         sha256 = hashlib.sha256(f.read()).hexdigest()  # lets Lookout replace an outdated helper
-    emit({"type": "hello", "version": VERSION, "home": HOME, "sha256": sha256})
+    emit({"type": "hello", "version": VERSION, "home": HOME, "sha256": sha256, "hooks": hooks_installed()})
     next_snapshot = 0.0
     while True:
         if os.path.getsize(EVENTS) < events.tell():  # rotated by a hook

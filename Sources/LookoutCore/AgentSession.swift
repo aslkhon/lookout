@@ -20,6 +20,12 @@ public enum AgentStatus: String, Codable, Sendable, CaseIterable {
     public var rank: Int { Self.allCases.firstIndex(of: self)! }
 }
 
+public struct ToolCall: Sendable, Equatable {
+    public var name: String
+    /// The command, path or URL it acts on.
+    public var argument: String?
+}
+
 public struct AgentSession: Identifiable, Sendable, Equatable {
     public var id: String { Self.key(source: source, sessionID: sessionID, host: host) }
     public var source: AgentSource
@@ -34,8 +40,16 @@ public struct AgentSession: Identifiable, Sendable, Equatable {
     public var detail: String?
     /// The last prompt the user submitted, as a title for the session.
     public var lastPrompt: String?
-    /// The agent's own name for the session (Codex thread name).
+    /// The agent's own name for the session (Claude session name, Codex thread name).
     public var name: String?
+    /// The tool call the agent is running or waiting on.
+    public var tool: ToolCall?
+    public var branch: String?
+    /// When the agent process started.
+    public var startedAt: Date?
+    /// Start of the current (or last) turn, and how long the last finished turn took.
+    public var turnStartedAt: Date?
+    public var lastTurnDuration: TimeInterval?
     public var agentPID: Int32?
     public var tty: String?
     public var termProgram: String?
@@ -77,15 +91,23 @@ public enum SessionReducer {
         s.term = ctx.term ?? s.term
         s.sshClientPort = ctx.sshClientPort ?? s.sshClientPort
         s.name = ctx.sessionName ?? s.name
+        s.branch = ctx.branch ?? s.branch
+        s.startedAt = ctx.startedAt.map { Date(timeIntervalSince1970: $0) } ?? s.startedAt
         s.lastEventAt = now
         if let prompt = p.prompt, !prompt.isEmpty { s.lastPrompt = prompt }
 
         guard let (status, detail) = transition(p, current: existing?.status) else { return s }
         if status != s.status || existing == nil { s.statusSince = now }
+        let wasActive = existing.map { $0.status == .working || $0.status.needsAttention } ?? false
+        if (status == .working || status.needsAttention) && !wasActive { s.turnStartedAt = now }
+        if status == .finished, wasActive, let start = s.turnStartedAt { s.lastTurnDuration = now.timeIntervalSince(start) }
         s.status = status
         s.detail = detail
+        s.tool = toolEvents.contains(p.hookEventName) ? p.toolCall : nil
         return s
     }
+
+    static let toolEvents: Set<String> = ["PreToolUse", "PostToolUse", "PostToolUseFailure", "PermissionRequest"]
 
     /// New status and detail for an event, or nil when the event doesn't change status.
     static func transition(_ p: HookPayload, current: AgentStatus?) -> (AgentStatus, String?)? {

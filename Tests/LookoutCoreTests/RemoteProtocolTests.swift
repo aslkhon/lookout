@@ -8,13 +8,14 @@ struct RemoteProtocolTests {
     }
 
     @Test func parsesHello() {
-        guard case .hello(let home, let sha)? = parse(#"{"type": "hello", "version": 1, "home": "/home/dev", "sha256": "ab12"}"#) else {
+        guard case .hello(let hello)? = parse(#"{"type": "hello", "version": 1, "home": "/home/dev", "sha256": "ab12", "hooks": {"claude": true, "codex": false}}"#) else {
             Issue.record("not a hello"); return
         }
-        #expect(home == "/home/dev")
-        #expect(sha == "ab12")
+        #expect(hello.home == "/home/dev")
+        #expect(hello.sha256 == "ab12")
+        #expect(hello.hooks == ["claude": true, "codex": false])
         // Helpers from before self-updating send no hash.
-        guard case .hello(_, nil)? = parse(#"{"type": "hello", "version": 1, "home": "/home/dev"}"#) else {
+        guard case .hello(let old)? = parse(#"{"type": "hello", "version": 1, "home": "/home/dev"}"#), old.sha256 == nil else {
             Issue.record("old hello not parsed"); return
         }
     }
@@ -78,5 +79,31 @@ struct CodexSessionIndexTests {
                                     payload: HookPayload(sessionID: "a", hookEventName: "Stop"))
         envelope.context.sessionName = "Review logs"
         #expect(SessionReducer.apply(envelope, to: nil).name == "Review logs")
+    }
+}
+
+struct SessionDetailsTests {
+    func event(_ name: String, tool: String? = nil, command: String? = nil) -> HookEnvelope {
+        HookEnvelope(source: .claude, context: HookContext(agentPID: 1),
+                     payload: HookPayload(sessionID: "s", hookEventName: name, toolName: tool,
+                                          toolInput: command.map { ["command": .string($0)] }))
+    }
+
+    @Test func turnDurationAndTool() {
+        let t0 = Date(timeIntervalSince1970: 1000)
+        var s = SessionReducer.apply(event("UserPromptSubmit"), to: nil, now: t0)
+        s = SessionReducer.apply(event("PermissionRequest", tool: "Bash", command: "terraform apply"), to: s, now: t0 + 60)
+        #expect(s.tool == ToolCall(name: "Bash", argument: "terraform apply"))
+        s = SessionReducer.apply(event("PreToolUse", tool: "Bash", command: "terraform apply"), to: s, now: t0 + 90)
+        #expect(s.turnStartedAt == t0) // approval doesn't restart the turn
+        s = SessionReducer.apply(event("Stop"), to: s, now: t0 + 540)
+        #expect(s.lastTurnDuration == 540)
+        #expect(s.tool == nil)
+    }
+
+    @Test func branchFromHead() {
+        #expect(GitInfo.branch(head: "ref: refs/heads/feature/x\n") == "feature/x")
+        #expect(GitInfo.branch(head: "9f3ca71e0b2c\n") == "9f3ca71")
+        #expect(GitInfo.branch(of: FileManager.default.currentDirectoryPath) != nil)
     }
 }

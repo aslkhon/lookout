@@ -1,175 +1,327 @@
+import AppKit
 import LookoutCore
+import ServiceManagement
 import SwiftUI
 
-/// First-launch setup: installs hooks into Claude Code and Codex configs and asks for notification permission.
+/// Setup: what's installed on this Mac and on each ssh host, with install/reinstall/remove for each.
+/// On first launch the footer's Install sets up everything available in one go.
 struct SetupView: View {
-    static let size = CGSize(width: 560, height: 640)
+    static let size = CGSize(width: 640, height: 780)
 
     @ObservedObject var model: AppModel
+    @ObservedObject var remotes: RemoteHosts
     var close: () -> Void
 
-    @State private var useClaude = true
-    @State private var useCodex = true
-    @State private var running = false
-    @State private var results: [String] = []
-    @State private var claudeInstalled = false
-    @State private var codexInstalled = false
-    @State private var useEditors = true
-    @State private var editorsInstalled = false
+    @State private var busy: Set<String> = []
+    /// Per-row result or error from the last action.
+    @State private var messages: [String: String] = [:]
+    @State private var notificationsAllowed: Bool?
+    @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
+    @State private var confirmRemoveAll = false
+    /// Bumped after file changes so installed states are re-read.
+    @State private var revision = 0
 
     private let editors = VSCodeExtension.editors
+    private var installer: HookInstaller { model.installer }
 
-    private var claudePresent: Bool { FileManager.default.fileExists(atPath: LookoutPaths.home.appendingPathComponent(".claude").path) }
-    private var codexPresent: Bool { FileManager.default.fileExists(atPath: LookoutPaths.home.appendingPathComponent(".codex").path) }
+    private func present(_ source: AgentSource) -> Bool {
+        FileManager.default.fileExists(atPath: LookoutPaths.home.appendingPathComponent(source == .claude ? ".claude" : ".codex").path)
+    }
+
+    private var firstRun: Bool { _ = revision; return model.needsSetup }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(spacing: 12) {
-                Image(systemName: "binoculars.fill").font(.system(size: 30)).foregroundStyle(.tint)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Set up Lookout").font(.title2.weight(.semibold))
-                    Text("Lookout watches your agents through their hook systems. Keep launching them however you like.")
-                        .foregroundStyle(.secondary)
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    header
+                    VStack(alignment: .leading, spacing: 8) {
+                        SectionTitle(title: "This Mac")
+                        card { thisMacRows }
+                    }
+                    RemoteHostsSection(model: model, remotes: remotes)
                 }
+                .padding(20)
             }
+            Divider()
+            footer
+        }
+        .frame(width: Self.size.width, height: Self.size.height)
+        .task { notificationsAllowed = await Notifier.shared.isAuthorized() }
+        .confirmationDialog("Remove Lookout's hooks from this Mac?", isPresented: $confirmRemoveAll) {
+            Button("Remove Hooks", role: .destructive) { removeAll() }
+        } message: {
+            Text("Takes Lookout's entries out of ~/.claude/settings.json and ~/.codex/hooks.json and uninstalls the editor extensions. Remote hosts keep theirs; use Remove on each host.")
+        }
+    }
 
-            VStack(alignment: .leading, spacing: 12) {
-                agentToggle(
-                    isOn: $useClaude, title: "Claude Code", present: claudePresent, installed: claudeInstalled,
-                    detail: "Adds hook entries to ~/.claude/settings.json.")
-                agentToggle(
-                    isOn: $useCodex, title: "Codex", present: codexPresent, installed: codexInstalled,
-                    detail: "Adds hook entries to ~/.codex/hooks.json and marks them trusted in ~/.codex/config.toml via Codex itself.")
-                agentToggle(
-                    isOn: $useEditors, title: editors.isEmpty ? "VS Code extension" : "\(editors.map(\.name).joined(separator: ", ")) extension",
-                    present: !editors.isEmpty, installed: editorsInstalled,
-                    detail: "Lets Lookout jump to the exact window and terminal running an agent. Installs a small Lookout extension.")
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(12)
-            .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+    // MARK: Header & footer
 
-            RemoteHostsSection(model: model, remotes: model.remotes)
-                .padding(12)
-                .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
-
-            Text("Existing hooks and settings are kept, and a timestamped backup of each file is saved next to it. Agents that are already running pick up the hooks after a restart. Lookout will also ask to send notifications.")
-                .font(.caption).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            VStack(alignment: .leading, spacing: 4) {
-                ForEach(results, id: \.self) { Text($0).font(.callout).lineLimit(2) }
-            }
-            Spacer(minLength: 0)
-
-            HStack {
-                if claudeInstalled || codexInstalled || editorsInstalled {
-                    Button("Remove", role: .destructive) { uninstall() }.disabled(running)
-                }
-                Spacer()
-                Button(results.isEmpty ? "Later" : "Done") { close() }.keyboardShortcut(.cancelAction)
-                Button("Install") { Task { await install() } }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(running || !(useClaude && claudePresent || useCodex && codexPresent || useEditors && !editors.isEmpty))
+    private var header: some View {
+        let active = model.sessions.values.filter { $0.status != .ended }
+        let machines = Set(active.map { $0.host ?? "" }).count
+        return HStack(spacing: 14) {
+            Image(systemName: firstRun ? "binoculars.fill" : "checkmark")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(firstRun ? Color.accentColor : .green)
+                .frame(width: 44, height: 44)
+                .background((firstRun ? Color.accentColor : .green).opacity(0.15), in: RoundedRectangle(cornerRadius: 10))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(firstRun ? "Set up Lookout"
+                     : "Lookout is watching \(active.count) agent\(active.count == 1 ? "" : "s") on \(max(machines, 1)) machine\(machines > 1 ? "s" : "")")
+                    .font(.title3.weight(.semibold))
+                Text("Keep launching agents however you like. Nothing is wrapped or relaunched.")
+                    .foregroundStyle(.secondary)
             }
         }
-        .padding(20)
-        .frame(width: Self.size.width, height: Self.size.height)
-        .onAppear(perform: refresh)
+    }
+
+    private var footer: some View {
+        HStack(spacing: 12) {
+            HStack(spacing: 4) {
+                Text("Backups of every edited file sit next to the original ·")
+                Button("Show in Finder") { showBackups() }
+                    .buttonStyle(.link)
+            }
+            .font(.caption).foregroundStyle(.secondary)
+            Spacer()
+            if firstRun {
+                Button("Later") { close() }.keyboardShortcut(.cancelAction)
+                Button("Install") { Task { await installAll() } }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(!busy.isEmpty)
+            } else {
+                Button("Remove all hooks…") { confirmRemoveAll = true }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(.red)
+                Button("Done") { close() }.keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(.horizontal, 20).padding(.vertical, 14)
+    }
+
+    // MARK: This Mac
+
+    @ViewBuilder
+    private var thisMacRows: some View {
+        let _ = revision
+        hookRow(.claude)
+        Divider()
+        hookRow(.codex)
+        ForEach(editors, id: \.bundleID) { editor in
+            Divider()
+            editorRow(editor)
+        }
+        Divider()
+        SetupRow(state: notificationsAllowed == true ? .ok : notificationsAllowed == false ? .warning : .unknown,
+                 title: "Notifications",
+                 subtitle: notificationsAllowed == false
+                    ? "Not allowed · turn them on in System Settings › Notifications › Lookout"
+                    : "Allowed · approvals, questions and finished turns",
+                 message: messages["notifications"]) {
+            if notificationsAllowed == false {
+                Button("Open Settings") {
+                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension")!)
+                }
+            } else {
+                Button("Send a test") { Notifier.shared.postTest() }
+            }
+        }
+        Divider()
+        SetupRow(state: nil, title: "Launch at login",
+                 subtitle: "Agents started before Lookout are still found, so this is just convenience.",
+                 message: messages["login"]) {
+            Toggle("", isOn: Binding(get: { launchAtLogin }, set: setLaunchAtLogin))
+                .toggleStyle(.checkbox)
+                .labelsHidden()
+        }
+    }
+
+    private func hookRow(_ source: AgentSource) -> some View {
+        let installed = installer.isInstalled(source)
+        let found = model.sessions.values.filter { $0.host == nil && $0.source == source && $0.status != .ended }.count
+        let file = source == .claude ? "~/.claude/settings.json" : "~/.codex/hooks.json"
+        let subtitle: String
+        if !present(source) {
+            subtitle = "\(source.displayName) isn't set up on this Mac (no ~/.\(source.rawValue) folder)"
+        } else if installed {
+            let entries = installer.entryCount(source)
+            subtitle = (source == .claude ? "Installed · \(entries) entries in \(file)" : "Installed · \(file)")
+                + " · \(found) agent\(found == 1 ? "" : "s") found"
+        } else {
+            subtitle = "Not installed · adds hook entries to \(file)"
+                + (source == .codex ? " and trusts them through Codex" : "")
+        }
+        let id = source.rawValue
+        return SetupRow(state: installed ? .ok : present(source) ? .missing : .unknown,
+                        title: "\(source.displayName) hooks", subtitle: subtitle, message: messages[id]) {
+            if busy.contains(id) {
+                ProgressView().controlSize(.small)
+            } else if present(source) {
+                installButton(installed: installed) { Task { await install(source) } }
+            }
+        }
+    }
+
+    private func editorRow(_ editor: (name: String, bundleID: String)) -> some View {
+        let version = VSCodeExtension.installedVersion(bundleID: editor.bundleID)
+        let id = editor.bundleID
+        return SetupRow(state: version != nil ? .ok : .missing, title: "\(editor.name) extension",
+                        subtitle: version.map { "Installed \($0) · lets Lookout jump to the exact window and terminal tab" }
+                            ?? "\(editor.name) is installed but has no Lookout extension yet. Jumping will focus the window only.",
+                        message: messages[id]) {
+            if busy.contains(id) {
+                ProgressView().controlSize(.small)
+            } else {
+                installButton(installed: version != nil) { Task { await installExtension(editor) } }
+            }
+        }
     }
 
     @ViewBuilder
-    private func agentToggle(isOn: Binding<Bool>, title: String, present: Bool, installed: Bool, detail: String) -> some View {
-        Toggle(isOn: isOn) {
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(title).font(.body.weight(.medium))
-                    if installed {
-                        Label("Installed", systemImage: "checkmark.circle.fill").font(.caption).foregroundStyle(.green)
-                    } else if !present {
-                        Text("Not found").font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-                Text(detail).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            }
+    private func installButton(installed: Bool, action: @escaping () -> Void) -> some View {
+        if installed {
+            Button("Reinstall", action: action)
+        } else {
+            Button("Install", action: action).buttonStyle(.borderedProminent)
         }
-        .disabled(!present)
     }
 
-    private func refresh() {
-        claudeInstalled = model.installer.isInstalled(.claude)
-        codexInstalled = model.installer.isInstalled(.codex)
-        useClaude = claudePresent
-        useCodex = codexPresent
-        editorsInstalled = !editors.isEmpty && editors.allSatisfy { VSCodeExtension.isInstalled(bundleID: $0.bundleID) }
-        useEditors = !editors.isEmpty
+    private func card<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        VStack(spacing: 0) { content() }
+            .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.primary.opacity(0.08)))
     }
 
-    private func install() async {
-        running = true
-        results = []
+    // MARK: Actions
+
+    private func installAll() async {
         model.installHookBinary()
-        let installer = model.installer
-
-        if useClaude && claudePresent {
-            do {
-                try installer.install(.claude)
-                results.append("✅ Claude Code hooks installed")
-            } catch {
-                results.append("❌ Claude Code: \(error.localizedDescription)")
-            }
-        }
-
-        if useCodex && codexPresent {
-            do {
-                try installer.install(.codex)
-                let hooksPath = installer.codexHooksURL.path
-                let trusted = try await Task.detached {
-                    let path = CodexTrust.shellPath()
-                    guard let codex = CodexTrust.findCodex(path: path) else { throw CodexTrustError.codexNotFound }
-                    return try CodexTrust.trustLookoutHooks(hooksFile: hooksPath, codexPath: codex, path: path)
-                }.value
-                results.append(trusted > 0 ? "✅ Codex hooks installed and trusted" : "✅ Codex hooks installed (already trusted)")
-            } catch {
-                results.append("⚠️ Codex: \(error.localizedDescription) Codex will ask you to review the hooks on its next launch.")
-            }
-        }
-
-        if useEditors {
-            for editor in editors {
-                do {
-                    try await Task.detached { try VSCodeExtension.install(bundleID: editor.bundleID) }.value
-                    results.append("✅ \(editor.name) extension installed")
-                } catch {
-                    results.append("⚠️ \(editor.name) extension: \(error.localizedDescription)")
-                }
-            }
-        }
-
-        let granted = await Notifier.shared.requestAuthorization()
-        results.append(granted ? "✅ Notifications enabled" : "⚠️ Notifications not allowed — enable them in System Settings › Notifications.")
-        refresh()
-        running = false
+        for source in AgentSource.allCases where present(source) { await install(source) }
+        for editor in editors { await installExtension(editor) }
+        notificationsAllowed = await Notifier.shared.requestAuthorization()
+        revision += 1
     }
 
-    private func uninstall() {
-        results = []
-        for source in [AgentSource.claude, .codex] where model.installer.isInstalled(source) {
+    private func install(_ source: AgentSource) async {
+        let id = source.rawValue
+        busy.insert(id)
+        defer { busy.remove(id); revision += 1 }
+        model.installHookBinary()
+        do {
+            try installer.install(source)
+            messages[id] = nil
+        } catch {
+            messages[id] = "❌ \(error.localizedDescription)"
+            return
+        }
+        guard source == .codex else { return }
+        let hooksPath = installer.codexHooksURL.path
+        do {
+            _ = try await Task.detached {
+                let path = CodexTrust.shellPath()
+                guard let codex = CodexTrust.findCodex(path: path) else { throw CodexTrustError.codexNotFound }
+                return try CodexTrust.trustLookoutHooks(hooksFile: hooksPath, codexPath: codex, path: path)
+            }.value
+        } catch {
+            messages[id] = "⚠️ Couldn't trust the hooks (\(error.localizedDescription)). Codex will ask you to review them on its next launch."
+        }
+    }
+
+    private func installExtension(_ editor: (name: String, bundleID: String)) async {
+        let id = editor.bundleID
+        busy.insert(id)
+        defer { busy.remove(id); revision += 1 }
+        do {
+            try await Task.detached { try VSCodeExtension.install(bundleID: editor.bundleID) }.value
+            messages[id] = "Reload open \(editor.name) windows once to activate it."
+        } catch {
+            messages[id] = "❌ \(error.localizedDescription)"
+        }
+    }
+
+    private func removeAll() {
+        for source in AgentSource.allCases where installer.isInstalled(source) {
             do {
-                try model.installer.uninstall(source)
-                results.append("Removed \(source.displayName) hooks")
+                try installer.uninstall(source)
+                messages[source.rawValue] = "Removed"
             } catch {
-                results.append("❌ \(source.displayName): \(error.localizedDescription)")
+                messages[source.rawValue] = "❌ \(error.localizedDescription)"
             }
         }
         for editor in editors where VSCodeExtension.isInstalled(bundleID: editor.bundleID) {
             do {
                 try VSCodeExtension.uninstall(bundleID: editor.bundleID)
-                results.append("Removed \(editor.name) extension")
+                messages[editor.bundleID] = "Removed"
             } catch {
-                results.append("❌ \(editor.name) extension: \(error.localizedDescription)")
+                messages[editor.bundleID] = "❌ \(error.localizedDescription)"
             }
         }
-        refresh()
+        revision += 1
+    }
+
+    private func setLaunchAtLogin(_ on: Bool) {
+        do {
+            if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
+            messages["login"] = nil
+        } catch {
+            messages["login"] = "❌ \(error.localizedDescription)"
+        }
+        launchAtLogin = SMAppService.mainApp.status == .enabled
+    }
+
+    private func showBackups() {
+        let files = [installer.claudeSettingsURL, installer.codexHooksURL]
+            .filter { FileManager.default.fileExists(atPath: $0.path) }
+        if files.isEmpty {
+            NSWorkspace.shared.open(LookoutPaths.home)
+        } else {
+            NSWorkspace.shared.activateFileViewerSelecting(files)
+        }
+    }
+}
+
+/// One line in a Setup card: status icon, title and subtitle, actions on the right.
+struct SetupRow<Actions: View>: View {
+    enum State { case ok, missing, warning, failed, unknown }
+
+    let state: State?
+    let title: String
+    var titleDetail: Text?
+    let subtitle: String
+    var message: String?
+    @ViewBuilder var actions: () -> Actions
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            if let state {
+                icon(state).frame(width: 18)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(title).fontWeight(.semibold)
+                    if let titleDetail { titleDetail }
+                }
+                Text(subtitle).font(.callout).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let message {
+                    Text(message).font(.caption).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer(minLength: 8)
+            HStack(spacing: 6) { actions() }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 11)
+    }
+
+    @ViewBuilder
+    private func icon(_ state: State) -> some View {
+        switch state {
+        case .ok: Image(systemName: "checkmark.circle").foregroundStyle(.green)
+        case .missing: Image(systemName: "circle.dashed").foregroundStyle(.secondary)
+        case .warning: Image(systemName: "exclamationmark.circle").foregroundStyle(.orange)
+        case .failed: Circle().fill(.red).frame(width: 8, height: 8)
+        case .unknown: Image(systemName: "circle").foregroundStyle(.tertiary)
+        }
     }
 }
