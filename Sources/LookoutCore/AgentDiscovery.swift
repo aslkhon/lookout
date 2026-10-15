@@ -62,11 +62,18 @@ public enum AgentDiscovery {
             guard let data = try? Data(contentsOf: url),
                   let file = try? JSONDecoder().decode(ClaudeSessionFile.self, from: data),
                   ProcessInspector.isAlive(file.pid),
-                  ProcessInspector.executablePath(file.pid).contains("claude") // guard against PID reuse
+                  isClaude(file.pid) // guard against PID reuse
             else { return nil }
             return agent(from: file, tty: ProcessInspector.info(file.pid).flatMap(ProcessInspector.tty),
                          hostBundleID: ProcessInspector.hostBundleID(of: file.pid))
         }
+    }
+
+    /// The executable path, or argv[0] when the binary is gone (Claude Code's updater deletes old versions).
+    static func isClaude(_ pid: pid_t) -> Bool {
+        let path = ProcessInspector.executablePath(pid)
+        if !path.isEmpty { return path.contains("claude") }
+        return ProcessInspector.arguments(pid).first.map { ($0 as NSString).lastPathComponent == "claude" } ?? false
     }
 
     static func agent(from file: ClaudeSessionFile, tty: String?, hostBundleID: String?) -> DiscoveredAgent {
