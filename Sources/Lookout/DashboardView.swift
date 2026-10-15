@@ -90,65 +90,79 @@ struct DashboardView: View {
 
     // MARK: Sidebar
 
-    /// One filter in the sidebar. Each section keeps its own choice, so the List selection holds one item per section.
+    /// One filter in the sidebar. Each section keeps its own choice.
     private enum Filter: Hashable {
         case status(AgentStatus.Group?)
         case host(HostFilter)
         case source(AgentSource?)
     }
 
-    private var filterSelection: Binding<Set<Filter>> {
-        Binding {
-            [.status(status), .host(hostFilter), .source(source)]
-        } set: { new in
-            // A click selects just that row; apply it and keep the other sections' choices.
-            for filter in new.subtracting([.status(status), .host(hostFilter), .source(source)]) {
-                switch filter {
-                case .status(let value): status = value
-                case .host(let value): hostFilter = value
-                case .source(let value): source = value
-                }
-            }
+    private func isSelected(_ filter: Filter) -> Bool {
+        switch filter {
+        case .status(let value): status == value
+        case .host(let value): hostFilter == value
+        case .source(let value): source == value
         }
     }
 
+    private func select(_ filter: Filter) {
+        switch filter {
+        case .status(let value): status = value
+        case .host(let value): hostFilter = value
+        case .source(let value): source = value
+        }
+    }
+
+    /// A sidebar row that draws its own highlight. List selection can't hold one choice per section:
+    /// a click deselects the other sections' rows and putting them back makes them blink.
+    private func filterRow<Icon: View>(_ filter: Filter, _ title: String, count: Int, countColor: Color = .secondary,
+                                       @ViewBuilder icon: () -> Icon) -> some View {
+        Button { select(filter) } label: {
+            HStack {
+                Label { Text(title) } icon: { icon() }
+                Spacer()
+                Text("\(count)").monospacedDigit().foregroundStyle(countColor)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .listRowBackground(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(isSelected(filter) ? Color.primary.opacity(0.1) : .clear)
+                .padding(.horizontal, 10)
+        )
+    }
+
     private var sidebar: some View {
-        List(selection: filterSelection) {
+        List {
             Section("Status") {
-                Label("All Agents", systemImage: "square.stack")
-                    .badge(all.count)
-                    .tag(Filter.status(nil))
+                filterRow(.status(nil), "All Agents", count: all.count) { Image(systemName: "square.stack") }
                 ForEach(AgentStatus.Group.allCases, id: \.self) { group in
                     let count = all.filter { $0.status.group == group }.count
-                    Label { Text(group.title) } icon: { StatusDot(status: group.dotStatus, size: 8) }
-                        .badge(group == .needsYou && count > 0 ? Text("\(count)").foregroundColor(.orange) : Text("\(count)"))
-                        .tag(Filter.status(group))
+                    filterRow(.status(group), group.title, count: count,
+                              countColor: group == .needsYou && count > 0 ? .orange : .secondary) {
+                        StatusDot(status: group.dotStatus, size: 8)
+                    }
                 }
             }
             Section("Hosts") {
-                Label("All Hosts", systemImage: "network")
-                    .badge(all.count)
-                    .tag(Filter.host(.all))
-                Label("This Mac", systemImage: "desktopcomputer")
-                    .badge(all.filter { $0.host == nil }.count)
-                    .tag(Filter.host(.local))
+                filterRow(.host(.all), "All Hosts", count: all.count) { Image(systemName: "network") }
+                filterRow(.host(.local), "This Mac", count: all.filter { $0.host == nil }.count) {
+                    Image(systemName: "desktopcomputer")
+                }
                 ForEach(remotes.hosts, id: \.self) { host in
-                    Label { Text(host) } icon: {
+                    filterRow(.host(.remote(host)), host, count: all.filter { $0.host == host }.count) {
                         Image(systemName: "globe").foregroundStyle(remotes.states[host].color)
                     }
-                    .badge(all.filter { $0.host == host }.count)
                     .help(remotes.states[host].label)
-                    .tag(Filter.host(.remote(host)))
                 }
             }
             Section("Agent") {
-                Label("Any Agent", systemImage: "circle.grid.2x1")
-                    .badge(all.count)
-                    .tag(Filter.source(nil))
+                filterRow(.source(nil), "Any Agent", count: all.count) { Image(systemName: "circle.grid.2x1") }
                 ForEach(AgentSource.allCases, id: \.self) { s in
-                    Label { Text(s.displayName) } icon: { AgentLogo(source: s) }
-                        .badge(all.filter { $0.source == s }.count)
-                        .tag(Filter.source(s))
+                    filterRow(.source(s), s.displayName, count: all.filter { $0.source == s }.count) {
+                        AgentLogo(source: s)
+                    }
                 }
             }
         }
