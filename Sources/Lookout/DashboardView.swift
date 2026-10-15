@@ -189,22 +189,26 @@ struct DashboardView: View {
         return "\(visible.count) shown\(hidden)"
     }
 
+    // A ScrollView rather than List: macOS List caches row heights and clips rows after filtering.
     private var agentList: some View {
-        List(selection: $selectedID) {
-            switch layout {
-            case .byStatus: statusSections
-            case .byProject: projectSections
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 2) {
+                    switch layout {
+                    case .byStatus: statusSections
+                    case .byProject: projectSections
+                    }
+                }
+                .padding(.horizontal, 12).padding(.bottom, 12)
             }
-        }
-        .listStyle(.inset)
-        .contextMenu(forSelectionType: AgentSession.ID.self) { ids in
-            if let id = ids.first, let session = model.sessions[id] {
-                Button("Focus Terminal") { model.focus(session) }
-                Button("Copy Directory") { copy(session.cwd) }
-                Button("Copy Session ID") { copy(session.sessionID) }
+            .focusable()
+            .focusEffectDisabled()
+            .onKeyPress(.upArrow) { moveSelection(-1, proxy); return .handled }
+            .onKeyPress(.downArrow) { moveSelection(1, proxy); return .handled }
+            .onKeyPress(.return) {
+                if let session = selected { model.focus(session) }
+                return .handled
             }
-        } primaryAction: { ids in
-            if let id = ids.first, let session = model.sessions[id] { model.focus(session) }
         }
         .overlay {
             if visible.isEmpty {
@@ -217,19 +221,34 @@ struct DashboardView: View {
         }
     }
 
+    /// Visible rows in display order, for arrow-key navigation.
+    private var orderedIDs: [AgentSession.ID] {
+        switch layout {
+        case .byStatus:
+            let groups = Dictionary(grouping: visible, by: \.status.group)
+            return AgentStatus.Group.allCases.flatMap { groups[$0] ?? [] }.map(\.id)
+        case .byProject:
+            return projects.filter { !collapsed.contains($0.name) }.flatMap(\.sessions).map(\.id)
+        }
+    }
+
+    private func moveSelection(_ delta: Int, _ proxy: ScrollViewProxy) {
+        let ids = orderedIDs
+        guard !ids.isEmpty else { return }
+        let index = selectedID.flatMap { ids.firstIndex(of: $0) }.map { $0 + delta } ?? (delta > 0 ? 0 : ids.count - 1)
+        selectedID = ids[min(max(index, 0), ids.count - 1)]
+        proxy.scrollTo(selectedID)
+    }
+
     @ViewBuilder
     private var statusSections: some View {
         let groups = Dictionary(grouping: visible, by: \.status.group)
         ForEach(AgentStatus.Group.allCases, id: \.self) { group in
             if let members = groups[group] {
-                Section {
-                    ForEach(members) { session in
-                        StatusRow(session: session, selected: selectedID == session.id)
-                            .tag(session.id)
-                            .listRowBackground(rowBackground(session))
-                    }
-                } header: {
-                    SectionTitle(title: group.title, count: members.count, color: group.color)
+                SectionTitle(title: group.title, count: members.count, color: group.color)
+                    .padding(.horizontal, 10).padding(.top, 12).padding(.bottom, 4)
+                ForEach(members) { session in
+                    row(session) { StatusRow(session: session, selected: selectedID == session.id) }
                 }
             }
         }
@@ -248,31 +267,55 @@ struct DashboardView: View {
     private var projectSections: some View {
         let endedByProject = Dictionary(grouping: scoped(all).filter { $0.status == .ended }, by: \.projectName)
         ForEach(projects, id: \.name) { project in
-            Section(isExpanded: Binding(
-                get: { !collapsed.contains(project.name) },
-                set: { if $0 { collapsed.remove(project.name) } else { collapsed.insert(project.name) } }
-            )) {
-                ForEach(project.sessions) { session in
-                    ProjectRow(session: session, selected: selectedID == session.id)
-                        .tag(session.id)
-                        .listRowBackground(rowBackground(session))
+            let expanded = !collapsed.contains(project.name)
+            VStack(alignment: .leading, spacing: 2) {
+                Button {
+                    if expanded { collapsed.insert(project.name) } else { collapsed.remove(project.name) }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .rotationEffect(.degrees(expanded ? 90 : 0))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 12)
+                        ProjectHeader(name: project.name, sessions: project.sessions,
+                                      endedHidden: status == nil ? endedByProject[project.name]?.count ?? 0 : 0)
+                    }
+                    .padding(.horizontal, 6)
+                    .contentShape(Rectangle())
                 }
-            } header: {
-                ProjectHeader(name: project.name, sessions: project.sessions,
-                              endedHidden: status == nil ? endedByProject[project.name]?.count ?? 0 : 0)
+                .buttonStyle(.plain)
+                if expanded {
+                    ForEach(project.sessions) { session in
+                        row(session) { ProjectRow(session: session, selected: selectedID == session.id) }
+                    }
+                }
             }
+            .padding(6)
+            .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
+            .padding(.top, 8)
         }
     }
 
-    /// Needs-you rows are tinted; the selected row gets the system highlight instead.
-    private func rowBackground(_ session: AgentSession) -> some View {
-        Group {
-            if session.needsYou && selectedID != session.id {
-                RoundedRectangle(cornerRadius: 6).fill(.orange.opacity(0.12)).padding(.horizontal, 4)
-            } else {
-                Color.clear
+    /// A selectable row: click selects, double-click (or Return) jumps to the terminal.
+    private func row<Content: View>(_ session: AgentSession, @ViewBuilder content: () -> Content) -> some View {
+        let isSelected = selectedID == session.id
+        return content()
+            .padding(.horizontal, 10)
+            .background {
+                RoundedRectangle(cornerRadius: 7).fill(
+                    isSelected ? Color.accentColor : session.needsYou ? Color.orange.opacity(0.12) : .clear)
             }
-        }
+            .foregroundStyle(isSelected ? .white : .primary)
+            .contentShape(Rectangle())
+            .id(session.id)
+            .onTapGesture(count: 2) { model.focus(session) }
+            .simultaneousGesture(TapGesture().onEnded { selectedID = session.id })
+            .contextMenu {
+                Button("Focus Terminal") { model.focus(session) }
+                Button("Copy Directory") { copy(session.cwd) }
+                Button("Copy Session ID") { copy(session.sessionID) }
+            }
     }
 
     private func copy(_ text: String) {

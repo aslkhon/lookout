@@ -107,3 +107,15 @@ struct SessionDetailsTests {
         #expect(GitInfo.branch(of: FileManager.default.currentDirectoryPath) != nil)
     }
 }
+
+struct PromptTests {
+    @Test func taskNotificationsArentPrompts() {
+        func submit(_ prompt: String) -> HookEnvelope {
+            HookEnvelope(source: .claude, context: HookContext(agentPID: 1),
+                         payload: HookPayload(sessionID: "s", hookEventName: "UserPromptSubmit", prompt: prompt))
+        }
+        var s = SessionReducer.apply(submit("Deploy staging"), to: nil)
+        s = SessionReducer.apply(submit("<task-notification>\n<task-id>x</task-id>\n</task-notification>"), to: s)
+        #expect(s.lastPrompt == "Deploy staging")
+    }
+}

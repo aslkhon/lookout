@@ -94,7 +94,8 @@ public enum SessionReducer {
         s.branch = ctx.branch ?? s.branch
         s.startedAt = ctx.startedAt.map { Date(timeIntervalSince1970: $0) } ?? s.startedAt
         s.lastEventAt = now
-        if let prompt = p.prompt, !prompt.isEmpty { s.lastPrompt = prompt }
+        // Claude Code also submits background-task results as prompts; those aren't the user's.
+        if let prompt = p.prompt, !prompt.isEmpty, !prompt.hasPrefix("<task-notification>") { s.lastPrompt = prompt }
 
         guard let (status, detail) = transition(p, current: existing?.status) else { return s }
         if status != s.status || existing == nil { s.statusSince = now }
