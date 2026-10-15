@@ -305,12 +305,10 @@ struct DashboardView: View {
     }
 
     private var projects: [(name: String, sessions: [AgentSession])] {
+        // Alphabetical so projects stay put; agents inside still sort by status.
         Dictionary(grouping: visible, by: \.projectName)
             .map { ($0.key, $0.value) }
-            .sorted { a, b in
-                let ra = a.sessions.map(\.status.rank).min() ?? 0, rb = b.sessions.map(\.status.rank).min() ?? 0
-                return (ra, a.name.lowercased()) < (rb, b.name.lowercased())
-            }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
     /// Each project is one card: its header and agents share a rounded background.
@@ -465,7 +463,7 @@ private struct StatusRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            StatusDot(status: session.status)
+            StatusIcon(session: session)
             AgentLogo(source: session.source, size: 16)
                 .help(session.source.displayName)
             HStack(spacing: 5) {
@@ -496,7 +494,7 @@ private struct ProjectRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            StatusDot(status: session.status)
+            StatusIcon(session: session)
             AgentLogo(source: session.source, size: 16)
                 .help(session.source.displayName)
             VStack(alignment: .leading, spacing: 3) {

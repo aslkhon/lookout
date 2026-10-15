@@ -103,6 +103,56 @@ struct StatusDot: View {
     }
 }
 
+/// Animated status for agent rows: a spinning ring while working, a pulse when it needs you,
+/// and an occasional bounce when finished or idle (staggered per agent so rows don't move together).
+struct StatusIcon: View {
+    let session: AgentSession
+    var size: CGFloat = 15
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        Group {
+            switch session.status {
+            case .working: spinner
+            case .needsApproval, .needsInput:
+                Image(systemName: "exclamationmark.circle.fill")
+                    .foregroundStyle(.orange)
+                    .symbolEffect(.pulse, isActive: !reduceMotion)
+            case .finished: occasional("checkmark.circle.fill", color: .purple, every: 7)
+            case .idle: occasional("moon.zzz.fill", color: .gray, every: 13)
+            case .ended: StatusDot(status: .ended)
+            }
+        }
+        .font(.system(size: size - 1))
+        .frame(width: size, height: size)
+        .help(session.status.label)
+    }
+
+    private var spinner: some View {
+        TimelineView(.animation(minimumInterval: 1 / 30, paused: reduceMotion)) { context in
+            let angle = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.2) / 1.2 * 360
+            ZStack {
+                Circle().stroke(Color.green.opacity(0.25), lineWidth: 2)
+                Circle().trim(from: 0, to: 0.3)
+                    .stroke(Color.green, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                    .rotationEffect(.degrees(angle))
+                Circle().fill(Color.green).frame(width: size * 0.35, height: size * 0.35)
+            }
+            .padding(1)
+        }
+    }
+
+    /// A symbol that bounces once every `every` seconds, offset per agent.
+    private func occasional(_ symbol: String, color: Color, every: TimeInterval) -> some View {
+        let offset = Double(abs(session.id.hashValue) % 1000) / 1000 * every
+        return TimelineView(.periodic(from: Date(timeIntervalSinceReferenceDate: offset), by: every)) { context in
+            Image(systemName: symbol)
+                .foregroundStyle(color)
+                .symbolEffect(.bounce, value: reduceMotion ? 0 : context.date.timeIntervalSinceReferenceDate)
+        }
+    }
+}
+
 /// A command the agent is running or waiting on.
 struct CodeBlock: View {
     let text: String
