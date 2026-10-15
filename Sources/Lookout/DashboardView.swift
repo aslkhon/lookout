@@ -24,6 +24,8 @@ struct DashboardView: View {
     @State private var query = ""
     @State private var selectedID: AgentSession.ID?
     @State private var collapsed: Set<String> = []
+    /// The project whose icon picker is open. Kept here: list rows are rebuilt as agents update.
+    @State private var editingIcon: String?
 
     private var all: [AgentSession] { model.sortedSessions }
 
@@ -85,6 +87,11 @@ struct DashboardView: View {
         } detail: {
             agentList
                 .toolbar { toolbar }
+        }
+        .sheet(isPresented: Binding(get: { editingIcon != nil }, set: { if !$0 { editingIcon = nil } })) {
+            if let project = editingIcon {
+                ProjectIconPicker(project: project) { editingIcon = nil }
+            }
         }
         .navigationTitle("Lookout")
         .onChange(of: columns) { showsSidebar = columns != .detailOnly }
@@ -306,18 +313,14 @@ struct DashboardView: View {
             }
     }
 
+    /// Each project is one card: its header and agents share a rounded background.
     @ViewBuilder
     private var projectSections: some View {
         let endedByProject = Dictionary(grouping: scoped(all).filter { $0.status == .ended }, by: \.projectName)
         ForEach(projects, id: \.name) { project in
             let expanded = !collapsed.contains(project.name)
+            let rows = expanded ? project.sessions : []
             Section {
-                if expanded {
-                    ForEach(project.sessions) { session in
-                        ProjectRow(session: session)
-                    }
-                }
-            } header: {
                 Button {
                     withAnimation { if expanded { collapsed.insert(project.name) } else { collapsed.remove(project.name) } }
                 } label: {
@@ -328,11 +331,22 @@ struct DashboardView: View {
                             .foregroundStyle(.secondary)
                             .frame(width: 10)
                         ProjectHeader(name: project.name, sessions: project.sessions,
-                                      endedHidden: status == nil ? endedByProject[project.name]?.count ?? 0 : 0)
+                                      endedHidden: status == nil ? endedByProject[project.name]?.count ?? 0 : 0) {
+                            editingIcon = project.name
+                        }
                     }
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .selectionDisabled()
+                .listRowSeparator(.hidden)
+                .listRowBackground(CardPiece(top: true, bottom: rows.isEmpty))
+                ForEach(rows) { session in
+                    let last = session.id == rows.last?.id
+                    ProjectRow(session: session)
+                        .listRowSeparator(last ? .hidden : .visible)
+                        .listRowBackground(CardPiece(top: false, bottom: last))
+                }
             }
         }
     }
@@ -451,12 +465,13 @@ private struct StatusRow: View {
     var body: some View {
         HStack(spacing: 12) {
             StatusDot(status: session.status)
+            AgentLogo(source: session.source, size: 16)
+                .help(session.source.displayName)
             HStack(spacing: 5) {
                 Text(session.projectName).fontWeight(.semibold).lineLimit(1)
                 if let branch = session.branch {
                     Text("/ \(branch)").foregroundStyle(.secondary).lineLimit(1)
                 }
-                SourceChip(source: session.source, onAccent: selected)
             }
             .frame(width: 220, alignment: .leading)
             StatusText(session: session)
@@ -481,11 +496,12 @@ private struct ProjectRow: View {
     var body: some View {
         HStack(spacing: 12) {
             StatusDot(status: session.status)
+            AgentLogo(source: session.source, size: 16)
+                .help(session.source.displayName)
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
                     .fontWeight(.semibold).lineLimit(1)
                 HStack(spacing: 4) {
-                    SourceChip(source: session.source, onAccent: selected)
                     if let host = session.host {
                         Chip(text: host, style: selected ? .onAccent : .remote)
                     } else if let app = session.appName {
@@ -509,12 +525,32 @@ private struct ProjectHeader: View {
     let name: String
     let sessions: [AgentSession]
     let endedHidden: Int
+    let pickIcon: () -> Void
+    @AppStorage private var icon: String
+
+    init(name: String, sessions: [AgentSession], endedHidden: Int, pickIcon: @escaping () -> Void) {
+        self.name = name; self.sessions = sessions; self.endedHidden = endedHidden; self.pickIcon = pickIcon
+        _icon = ProjectIconPicker.storage(for: name)
+    }
 
     var body: some View {
         let hosts = Array(Set(sessions.map { $0.host ?? "" })).sorted()
         let cwds = Set(sessions.map(\.cwd))
         let counts = Dictionary(grouping: sessions, by: \.status.group).mapValues(\.count)
         HStack(spacing: 8) {
+            Button(action: pickIcon) {
+                Group {
+                    if icon.isEmpty {
+                        Image(systemName: "folder").foregroundStyle(.secondary)
+                    } else {
+                        Text(icon)
+                    }
+                }
+                .font(.body)
+                .frame(width: 20)
+            }
+            .buttonStyle(.plain)
+            .help("Set Icon")
             Text(name).font(.body.weight(.semibold)).foregroundStyle(.primary)
             ForEach(hosts, id: \.self) { HostChip(host: $0.isEmpty ? nil : $0) }
             if cwds.count == 1, let cwd = cwds.first {
@@ -538,6 +574,68 @@ private struct ProjectHeader: View {
         .font(.caption)
         .textCase(nil)
         .padding(.vertical, 4)
+    }
+}
+
+/// A slice of a project card: rounded at the top for the header, at the bottom for the last row.
+private struct CardPiece: View {
+    let top: Bool
+    let bottom: Bool
+
+    var body: some View {
+        UnevenRoundedRectangle(topLeadingRadius: top ? 10 : 0, bottomLeadingRadius: bottom ? 10 : 0,
+                               bottomTrailingRadius: bottom ? 10 : 0, topTrailingRadius: top ? 10 : 0)
+            .fill(.primary.opacity(0.05))
+            .padding(.top, top ? 4 : 0).padding(.bottom, bottom ? 4 : 0)
+            .padding(.horizontal, 8)
+    }
+}
+
+/// Emoji for a project, saved per project name.
+private struct ProjectIconPicker: View {
+    let project: String
+    let done: () -> Void
+    @AppStorage private var icon: String
+    @FocusState private var fieldFocused: Bool
+
+    static func storage(for project: String) -> AppStorage<String> {
+        AppStorage(wrappedValue: "", "projectIcon.\(project)")
+    }
+
+    init(project: String, done: @escaping () -> Void) {
+        self.project = project; self.done = done
+        _icon = Self.storage(for: project)
+    }
+
+    private static let suggestions = ["🚀", "🧠", "📞", "💬", "🛒", "💳", "📊", "📈", "🔭", "🛠️", "🧪", "🤖",
+                                      "🌐", "📱", "🖥️", "🗄️", "🔒", "📦", "🎨", "📝", "🎧", "🎬", "🏦", "⚡️"]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Icon for \(project)").font(.headline)
+            LazyVGrid(columns: Array(repeating: GridItem(.fixed(28), spacing: 4), count: 8), spacing: 4) {
+                ForEach(Self.suggestions, id: \.self) { emoji in
+                    Button { icon = emoji; done() } label: {
+                        Text(emoji).font(.title3).frame(width: 28, height: 28)
+                            .background(icon == emoji ? Color.accentColor.opacity(0.25) : .clear,
+                                        in: RoundedRectangle(cornerRadius: 6))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            HStack {
+                TextField("Any emoji", text: Binding(get: { icon }, set: { icon = $0.last.map(String.init) ?? "" }))
+                    .focused($fieldFocused)
+                    .frame(width: 90)
+                    .onSubmit(done)
+                Button("Emoji…") { fieldFocused = true; NSApp.orderFrontCharacterPalette(nil) }
+                Spacer()
+                Button("Remove") { icon = ""; done() }.disabled(icon.isEmpty)
+                Button("Done", action: done).keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(16)
+        .frame(width: 330)
     }
 }
 
