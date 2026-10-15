@@ -130,3 +130,14 @@ struct RemoteIdleTimeTests {
         #expect(s.statusSince == Date(timeIntervalSince1970: 1000.5))
     }
 }
+
+struct LateStartTimeTests {
+    @Test func idleAdoptsStartTimeThatArrivesLater() {
+        var agent = DiscoveredAgent(source: .codex, pid: 7, cwd: "/srv/a", tty: nil)
+        var s = SessionReducer.apply(agent, to: nil, now: Date(timeIntervalSince1970: 5000))
+        #expect(s.statusSince == Date(timeIntervalSince1970: 5000))
+        agent.startedAt = Date(timeIntervalSince1970: 1000)
+        s = SessionReducer.apply(agent, to: s, now: Date(timeIntervalSince1970: 5005))
+        #expect(s.statusSince == Date(timeIntervalSince1970: 1000))
+    }
+}

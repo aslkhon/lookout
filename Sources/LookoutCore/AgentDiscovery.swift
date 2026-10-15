@@ -119,7 +119,11 @@ extension SessionReducer {
             source: agent.source, host: agent.host, sessionID: agent.sessionID ?? "pid:\(agent.pid)", cwd: agent.cwd,
             status: .idle, statusSince: agent.statusSince ?? agent.startedAt ?? now, lastEventAt: now)
         let status = agent.status ?? .idle
-        if status != s.status { s.statusSince = agent.statusSince ?? now }
+        if status != s.status {
+            s.statusSince = agent.statusSince ?? now
+        } else if status == .idle, agent.statusSince == nil, s.startedAt == nil, let started = agent.startedAt {
+            s.statusSince = min(s.statusSince, started) // start time arrived after the session was created
+        }
         s.status = status
         s.detail = agent.detail
         s.cwd = agent.cwd

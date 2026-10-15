@@ -60,7 +60,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                                   backing: .buffered, defer: false)
             window.title = "Lookout"
             window.isReleasedWhenClosed = false
-            window.toolbarStyle = .unified
+            window.titlebarAppearsTransparent = true
+            window.titleVisibility = .hidden
             let hosting = NSHostingController(
                 rootView: DashboardView(model: AppModel.shared, remotes: AppModel.shared.remotes, openSetup: { [weak self] in self?.showSetup() }))
             hosting.sizingOptions = [] // window size is user-controlled

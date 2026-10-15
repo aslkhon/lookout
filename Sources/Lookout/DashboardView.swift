@@ -48,23 +48,30 @@ struct DashboardView: View {
     private var selected: AgentSession? { selectedID.flatMap { model.sessions[$0] } }
 
     var body: some View {
-        NavigationSplitView {
+        // Fixed columns under a transparent title bar (the traffic lights sit over the sidebar).
+        HStack(spacing: 0) {
             sidebar
-                .navigationSplitViewColumnWidth(min: 170, ideal: 180, max: 220)
-        } content: {
+                .frame(width: 190)
+                .padding(.top, 40)
+                .background(Color.primary.opacity(0.03))
+            Divider()
             VStack(spacing: 0) {
                 contentHeader
                 agentList
             }
-            .navigationSplitViewColumnWidth(min: 480, ideal: 620)
-        } detail: {
-            if let session = selected {
-                AgentDetailView(session: session) { model.focus(session) }
-            } else {
-                ContentUnavailableView("No Agent Selected", systemImage: "binoculars",
-                                       description: Text("Select an agent to see its details. Double-click to jump to its terminal."))
+            .frame(minWidth: 480, maxWidth: .infinity)
+            Divider()
+            Group {
+                if let session = selected {
+                    AgentDetailView(session: session) { model.focus(session) }
+                } else {
+                    ContentUnavailableView("No Agent Selected", systemImage: "binoculars",
+                                           description: Text("Select an agent to see its details. Double-click to jump to its terminal."))
+                }
             }
+            .frame(width: 330)
         }
+        .ignoresSafeArea()
     }
 
     // MARK: Sidebar
@@ -158,27 +165,43 @@ struct DashboardView: View {
 
     private var contentHeader: some View {
         HStack(spacing: 10) {
-            Picker("Layout", selection: $layout) {
-                ForEach(Layout.allCases, id: \.self) { Text($0.rawValue) }
+            HStack(spacing: 2) {
+                ForEach(Layout.allCases, id: \.self) { option in
+                    Button { layout = option } label: {
+                        Text(option.rawValue)
+                            .fontWeight(.medium)
+                            .foregroundStyle(layout == option ? .primary : .secondary)
+                            .padding(.horizontal, 11).padding(.vertical, 5)
+                            .background(layout == option ? Color.primary.opacity(0.14) : .clear,
+                                        in: RoundedRectangle(cornerRadius: 6))
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .focusEffectDisabled()
+                }
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
-            TextField("Project, prompt or command", text: $query)
-                .textFieldStyle(.roundedBorder)
+            .padding(3)
+            .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("Project, prompt or command", text: $query)
+                    .textFieldStyle(.plain)
+            }
+            .padding(.horizontal, 10).frame(height: 30)
+            .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
             Text(countLabel)
-                .font(.caption).foregroundStyle(.secondary)
+                .foregroundStyle(.secondary)
                 .lineLimit(1).fixedSize()
             if layout == .byStatus {
-                Button("Clear ended") { model.clearEnded() }
-                    .disabled(!all.contains { $0.status == .ended })
+                HeaderButton(title: "Clear ended", disabled: !all.contains { $0.status == .ended }) { model.clearEnded() }
             } else {
-                Button(collapsed.isEmpty ? "Collapse all" : "Expand all") {
+                HeaderButton(title: collapsed.isEmpty ? "Collapse all" : "Expand all") {
                     collapsed = collapsed.isEmpty ? Set(projects.map(\.name)) : []
                 }
             }
         }
-        .padding(.horizontal, 12).padding(.vertical, 10)
+        .font(.callout)
+        .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 6)
     }
 
     private var countLabel: String {
@@ -190,10 +213,11 @@ struct DashboardView: View {
     }
 
     // A ScrollView rather than List: macOS List caches row heights and clips rows after filtering.
+    // Not lazy either: LazyVStack showed stale rows after an agent moved to another section.
     private var agentList: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 2) {
                     switch layout {
                     case .byStatus: statusSections
                     case .byProject: projectSections
@@ -324,6 +348,24 @@ struct DashboardView: View {
     }
 }
 
+private struct HeaderButton: View {
+    let title: String
+    var disabled = false
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title).fontWeight(.medium)
+                .padding(.horizontal, 12).frame(height: 30)
+                .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .opacity(disabled ? 0.45 : 1)
+    }
+}
+
 extension RemoteHosts.State? {
     var color: Color {
         switch self {
@@ -392,7 +434,7 @@ private struct StatusRow: View {
         HStack(spacing: 12) {
             StatusDot(status: session.status)
             HStack(spacing: 5) {
-                Text(session.projectName).fontWeight(.semibold).lineLimit(1)
+                Text(session.projectName).font(.body.weight(.semibold)).lineLimit(1)
                 if let branch = session.branch {
                     Text("/ \(branch)").foregroundStyle(selected ? AnyShapeStyle(.white.opacity(0.8)) : AnyShapeStyle(.secondary))
                         .lineLimit(1)
@@ -405,7 +447,8 @@ private struct StatusRow: View {
             HostChip(host: session.host, onAccent: selected)
             TimeLabel(session: session, selected: selected)
         }
-        .padding(.vertical, 6)
+        .frame(minHeight: 34)
+        .padding(.vertical, 8)
         .opacity(session.status == .ended ? 0.6 : 1)
         .help(session.cwd)
     }
