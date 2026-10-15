@@ -119,3 +119,14 @@ struct PromptTests {
         #expect(s.lastPrompt == "Deploy staging")
     }
 }
+
+struct RemoteIdleTimeTests {
+    @Test func idleSinceProcessStart() {
+        let line = #"{"type": "agents", "alive": [7], "agents": [{"source": "codex", "agentPID": 7, "cwd": "/srv/a", "startedAt": 1000.5, "branch": "main"}]}"#
+        guard case .agents(let found, _)? = RemoteMessage.parse(Data(line.utf8), host: "box") else {
+            Issue.record("not parsed"); return
+        }
+        let s = SessionReducer.apply(found[0], to: nil, now: Date(timeIntervalSince1970: 5000))
+        #expect(s.statusSince == Date(timeIntervalSince1970: 1000.5))
+    }
+}

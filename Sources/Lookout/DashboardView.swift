@@ -533,7 +533,7 @@ struct AgentDetailView: View {
             HStack(spacing: 5) {
                 SourceChip(source: session.source)
                 if let app = session.appName {
-                    Chip(text: [app, session.tty.map { ($0 as NSString).lastPathComponent }].compactMap { $0 }.joined(separator: " · "))
+                    Chip(text: [app, session.tty.map { $0.hasPrefix("/dev/") ? String($0.dropFirst(5)) : $0 }].compactMap { $0 }.joined(separator: " · "))
                 }
                 HostChip(host: session.host)
             }
