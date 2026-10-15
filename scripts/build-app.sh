@@ -13,7 +13,7 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN/Lookout" "$BIN/lookout-hook" "$APP/Contents/MacOS/"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
-cp Resources/AppIcon.icns "$APP/Contents/Resources/"
+cp Resources/AppIcon.icns Resources/ClaudeLogo.pdf Resources/CodexLogo.pdf "$APP/Contents/Resources/"
 ./scripts/package-vscode.sh
 cp build/lookout-vscode.vsix "$APP/Contents/Resources/"
 cp Remote/lookout-hook "$APP/Contents/Resources/remote-lookout-hook"

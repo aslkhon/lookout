@@ -48,6 +48,31 @@ struct SourceChip: View {
     var body: some View { Chip(text: source.displayName, style: onAccent ? .onAccent : .neutral) }
 }
 
+/// The agent's logo (Claude and OpenAI marks from Simple Icons, CC0), tinted like a symbol.
+struct AgentLogo: View {
+    let source: AgentSource
+    var size: CGFloat = 14
+
+    private static let images: [AgentSource: NSImage] = AgentSource.allCases.reduce(into: [:]) { images, source in
+        let name = source == .claude ? "ClaudeLogo" : "CodexLogo"
+        guard let url = Bundle.main.url(forResource: name, withExtension: "pdf"),
+              let image = NSImage(contentsOf: url) else { return }
+        image.isTemplate = true
+        images[source] = image
+    }
+
+    var body: some View {
+        if let image = Self.images[source] {
+            Image(nsImage: image)
+                .resizable()
+                .frame(width: size, height: size)
+                .foregroundStyle(source == .claude ? Color(red: 0.85, green: 0.47, blue: 0.34) : .primary)
+        } else {
+            Image(systemName: "terminal") // not bundled, e.g. under `swift run`
+        }
+    }
+}
+
 /// "This Mac", or the ssh host an agent runs on.
 struct HostChip: View {
     let host: String?

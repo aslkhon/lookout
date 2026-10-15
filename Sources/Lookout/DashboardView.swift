@@ -14,6 +14,9 @@ struct DashboardView: View {
 
     @AppStorage("dashboardLayout") private var layout: Layout = .byStatus
     @AppStorage("dashboardShowsSidebar") private var showsSidebar = true
+    /// Drives the split view; a binding computed from @AppStorage loses the toggle's animation.
+    @State private var columns: NavigationSplitViewVisibility =
+        UserDefaults.standard.object(forKey: "dashboardShowsSidebar") as? Bool == false ? .detailOnly : .all
     @AppStorage("dashboardShowsDetail") private var showsDetail = true
     @State private var status: AgentStatus.Group?
     @State private var hostFilter: HostFilter = .all
@@ -50,9 +53,7 @@ struct DashboardView: View {
     private var selected: AgentSession? { selectedID.flatMap { model.sessions[$0] } }
 
     var body: some View {
-        NavigationSplitView(columnVisibility: Binding(
-            get: { showsSidebar ? .all : .detailOnly },
-            set: { showsSidebar = $0 != .detailOnly })) {
+        NavigationSplitView(columnVisibility: $columns) {
             sidebar
                 .frame(minWidth: 200) // the custom toolbar toggle otherwise lets the column shrink to the toolbar's width
                 .navigationSplitViewColumnWidth(min: 200, ideal: 210, max: 280)
@@ -69,6 +70,7 @@ struct DashboardView: View {
                 .toolbar { toolbar }
         }
         .navigationTitle("Lookout")
+        .onChange(of: columns) { showsSidebar = columns != .detailOnly }
         .navigationSubtitle(countLabel)
         .inspector(isPresented: $showsDetail) {
             Group {
@@ -144,7 +146,7 @@ struct DashboardView: View {
                     .badge(all.count)
                     .tag(Filter.source(nil))
                 ForEach(AgentSource.allCases, id: \.self) { s in
-                    Label(s.displayName, systemImage: s == .claude ? "asterisk" : "chevron.left.forwardslash.chevron.right")
+                    Label { Text(s.displayName) } icon: { AgentLogo(source: s) }
                         .badge(all.filter { $0.source == s }.count)
                         .tag(Filter.source(s))
                 }
@@ -165,7 +167,7 @@ struct DashboardView: View {
 
     private var sidebarToggle: some View {
         Button(showsSidebar ? "Hide Sidebar" : "Show Sidebar", systemImage: "sidebar.left") {
-            withAnimation { showsSidebar.toggle() }
+            withAnimation { columns = columns == .detailOnly ? .all : .detailOnly }
         }
         .keyboardShortcut("s", modifiers: [.control, .command])
         .help(showsSidebar ? "Hide Sidebar" : "Show Sidebar")
