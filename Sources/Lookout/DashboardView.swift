@@ -335,6 +335,7 @@ struct DashboardView: View {
                             editingIcon = project.name
                         }
                     }
+                    .padding(.horizontal, 8).padding(.vertical, 4)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -515,7 +516,7 @@ private struct ProjectRow: View {
             TimeLabel(session: session)
         }
         .frame(height: rowHeight)
-        .padding(.vertical, 6).padding(.horizontal, 4)
+        .padding(.vertical, 6).padding(.horizontal, 12) // inside the project card
         .opacity(session.status == .ended ? 0.6 : 1)
         .help(session.cwd)
     }
