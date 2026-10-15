@@ -60,7 +60,8 @@ public struct AgentSession: Identifiable, Sendable, Equatable {
     public var sshClientPort: Int?
 
     public var projectName: String {
-        let name = URL(fileURLWithPath: cwd).lastPathComponent
+        // Not URL(fileURLWithPath:): it lstat()s the path, and remote paths under /home hit the automounter.
+        let name = (cwd as NSString).lastPathComponent
         return name.isEmpty ? cwd : name
     }
 
