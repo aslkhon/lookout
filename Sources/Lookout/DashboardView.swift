@@ -50,175 +50,139 @@ struct DashboardView: View {
     private var selected: AgentSession? { selectedID.flatMap { model.sessions[$0] } }
 
     var body: some View {
-        // Fixed columns under a transparent title bar (the traffic lights sit over the sidebar).
-        HStack(spacing: 0) {
-            if showsSidebar {
-                sidebar
-                    .frame(width: 190)
-                    .padding(.top, 40)
-                    .background(Color.primary.opacity(0.03))
-                    .transition(.move(edge: .leading))
-                Divider()
-            }
-            VStack(spacing: 0) {
-                contentHeader
-                agentList
-            }
-            .frame(minWidth: 480, maxWidth: .infinity)
-            if showsDetail {
-                Divider()
-                Group {
-                    if let session = selected {
-                        AgentDetailView(session: session) { model.focus(session) }
-                    } else {
-                        ContentUnavailableView("No Agent Selected", systemImage: "binoculars",
-                                               description: Text("Select an agent to see its details. Double-click to jump to its terminal."))
-                    }
-                }
-                .frame(width: 330)
-                .transition(.move(edge: .trailing))
-            }
+        NavigationSplitView(columnVisibility: Binding(
+            get: { showsSidebar ? .all : .detailOnly },
+            set: { showsSidebar = $0 != .detailOnly })) {
+            sidebar
+                .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 260)
+        } detail: {
+            agentList
+                .navigationSplitViewColumnWidth(min: 460, ideal: 640)
+                .toolbar { toolbar }
         }
-        .ignoresSafeArea()
+        .navigationTitle("Lookout")
+        .navigationSubtitle(countLabel)
+        .searchable(text: $query, placement: .toolbar, prompt: "Project, prompt or command")
+        .inspector(isPresented: $showsDetail) {
+            Group {
+                if let session = selected {
+                    AgentDetailView(session: session) { model.focus(session) }
+                } else {
+                    ContentUnavailableView("No Agent Selected", systemImage: "binoculars",
+                                           description: Text("Select an agent to see its details. Double-click to jump to its terminal."))
+                }
+            }
+            .inspectorColumnWidth(min: 280, ideal: 330, max: 440)
+        }
     }
 
     // MARK: Sidebar
 
-    private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 2) {
-                    sidebarSection("Status")
-                    filterRow("All agents", count: all.count, selected: status == nil) { status = nil }
-                    ForEach(AgentStatus.Group.allCases, id: \.self) { group in
-                        filterRow(group.title, count: all.filter { $0.status.group == group }.count,
-                                  selected: status == group, highlightCount: group == .needsYou) {
-                            status = group
-                        } icon: {
-                            StatusDot(status: group.dotStatus, size: 7)
-                        }
-                    }
+    /// One filter in the sidebar. Each section keeps its own choice, so the List selection holds one item per section.
+    private enum Filter: Hashable {
+        case status(AgentStatus.Group?)
+        case host(HostFilter)
+        case source(AgentSource?)
+    }
 
-                    sidebarSection("Hosts")
-                    filterRow("All hosts", count: all.count, selected: hostFilter == .all) { hostFilter = .all }
-                    filterRow("This Mac", count: all.filter { $0.host == nil }.count, selected: hostFilter == .local) {
-                        hostFilter = .local
-                    } icon: {
-                        Image(systemName: "desktopcomputer").imageScale(.small).foregroundStyle(.secondary)
-                    }
-                    ForEach(remotes.hosts, id: \.self) { host in
-                        filterRow(host, count: all.filter { $0.host == host }.count,
-                                  selected: hostFilter == .remote(host), connection: remotes.states[host]) {
-                            hostFilter = .remote(host)
-                        } icon: {
-                            Image(systemName: "globe").imageScale(.small).foregroundStyle(.teal)
-                        }
-                    }
-
-                    sidebarSection("Agent")
-                    filterRow("Both", count: all.count, selected: source == nil) { source = nil }
-                    ForEach(AgentSource.allCases, id: \.self) { s in
-                        filterRow(s.displayName, count: all.filter { $0.source == s }.count, selected: source == s) {
-                            source = s
-                        }
-                    }
+    private var filterSelection: Binding<Set<Filter>> {
+        Binding {
+            [.status(status), .host(hostFilter), .source(source)]
+        } set: { new in
+            // A click selects just that row; apply it and keep the other sections' choices.
+            for filter in new.subtracting([.status(status), .host(hostFilter), .source(source)]) {
+                switch filter {
+                case .status(let value): status = value
+                case .host(let value): hostFilter = value
+                case .source(let value): source = value
                 }
-                .padding(.horizontal, 8).padding(.vertical, 8)
             }
+        }
+    }
+
+    private var sidebar: some View {
+        List(selection: filterSelection) {
+            Section("Status") {
+                Label("All Agents", systemImage: "square.stack")
+                    .badge(all.count)
+                    .tag(Filter.status(nil))
+                ForEach(AgentStatus.Group.allCases, id: \.self) { group in
+                    let count = all.filter { $0.status.group == group }.count
+                    Label { Text(group.title) } icon: { StatusDot(status: group.dotStatus, size: 8) }
+                        .badge(group == .needsYou && count > 0 ? Text("\(count)").foregroundColor(.orange) : Text("\(count)"))
+                        .tag(Filter.status(group))
+                }
+            }
+            Section("Hosts") {
+                Label("All Hosts", systemImage: "network")
+                    .badge(all.count)
+                    .tag(Filter.host(.all))
+                Label("This Mac", systemImage: "desktopcomputer")
+                    .badge(all.filter { $0.host == nil }.count)
+                    .tag(Filter.host(.local))
+                ForEach(remotes.hosts, id: \.self) { host in
+                    Label { Text(host) } icon: {
+                        Image(systemName: "globe").foregroundStyle(remotes.states[host].color)
+                    }
+                    .badge(all.filter { $0.host == host }.count)
+                    .help(remotes.states[host].label)
+                    .tag(Filter.host(.remote(host)))
+                }
+            }
+            Section("Agent") {
+                Label("Any Agent", systemImage: "circle.grid.2x1")
+                    .badge(all.count)
+                    .tag(Filter.source(nil))
+                ForEach(AgentSource.allCases, id: \.self) { s in
+                    Label(s.displayName, systemImage: s == .claude ? "asterisk" : "chevron.left.forwardslash.chevron.right")
+                        .badge(all.filter { $0.source == s }.count)
+                        .tag(Filter.source(s))
+                }
+            }
+        }
+        .listStyle(.sidebar)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
             Button(action: openSetup) {
                 Label("Setup", systemImage: "gearshape")
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(.borderless)
-            .foregroundStyle(.secondary)
-            .padding(14)
+            .padding(.horizontal, 16).padding(.vertical, 12)
         }
     }
 
-    private func sidebarSection(_ title: String) -> some View {
-        SectionTitle(title: title)
-            .padding(.horizontal, 8).padding(.top, 14).padding(.bottom, 4)
-    }
+    // MARK: Toolbar
 
-    private func filterRow(_ title: String, count: Int, selected: Bool, highlightCount: Bool = false,
-                           connection: RemoteHosts.State? = nil,
-                           action: @escaping () -> Void) -> some View {
-        filterRow(title, count: count, selected: selected, highlightCount: highlightCount,
-                  connection: connection, action: action) { EmptyView() }
-    }
-
-    private func filterRow<Icon: View>(_ title: String, count: Int, selected: Bool, highlightCount: Bool = false,
-                                       connection: RemoteHosts.State? = nil,
-                                       action: @escaping () -> Void, @ViewBuilder icon: () -> Icon) -> some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                icon()
-                Text(title).lineLimit(1)
-                Spacer(minLength: 4)
-                if let connection {
-                    Circle().fill(connection.color).frame(width: 6, height: 6)
-                }
-                Text("\(count)")
-                    .foregroundStyle(highlightCount && count > 0 ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
-                    .monospacedDigit()
+    @ToolbarContentBuilder
+    private var toolbar: some ToolbarContent {
+        ToolbarItem {
+            Picker("Layout", selection: $layout) {
+                ForEach(Layout.allCases, id: \.self) { Text($0.rawValue).tag($0) }
             }
-            .font(.callout.weight(selected ? .semibold : .regular))
-            .padding(.horizontal, 8).padding(.vertical, 5)
-            .background(selected ? Color.primary.opacity(0.1) : .clear, in: RoundedRectangle(cornerRadius: 6))
-            .contentShape(Rectangle())
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .help("Group agents by status or by project")
         }
-        .buttonStyle(.plain)
-    }
-
-    // MARK: Content
-
-    private var contentHeader: some View {
-        HStack(spacing: 10) {
-            PanelToggle(systemImage: "sidebar.left", help: showsSidebar ? "Hide Sidebar" : "Show Sidebar") {
-                withAnimation(.easeInOut(duration: 0.2)) { showsSidebar.toggle() }
-            }
-            .keyboardShortcut("s", modifiers: [.control, .command])
-            HStack(spacing: 2) {
-                ForEach(Layout.allCases, id: \.self) { option in
-                    Button { layout = option } label: {
-                        Text(option.rawValue)
-                            .fontWeight(.medium)
-                            .foregroundStyle(layout == option ? .primary : .secondary)
-                            .padding(.horizontal, 11).padding(.vertical, 5)
-                            .background(layout == option ? Color.primary.opacity(0.14) : .clear,
-                                        in: RoundedRectangle(cornerRadius: 6))
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .focusEffectDisabled()
-                }
-            }
-            .padding(3)
-            .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
-            HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("Project, prompt or command", text: $query)
-                    .textFieldStyle(.plain)
-            }
-            .padding(.horizontal, 10).frame(height: 30)
-            .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
-            Text(countLabel)
-                .foregroundStyle(.secondary)
-                .lineLimit(1).fixedSize()
+        ToolbarItem {
             if layout == .byStatus {
-                HeaderButton(title: "Clear ended", disabled: !all.contains { $0.status == .ended }) { model.clearEnded() }
+                Button("Clear Ended", systemImage: "clear") { model.clearEnded() }
+                    .disabled(!all.contains { $0.status == .ended })
+                    .help("Remove ended agents from the list")
             } else {
-                HeaderButton(title: collapsed.isEmpty ? "Collapse all" : "Expand all") {
+                Button(collapsed.isEmpty ? "Collapse All" : "Expand All",
+                       systemImage: collapsed.isEmpty ? "rectangle.compress.vertical" : "rectangle.expand.vertical") {
                     collapsed = collapsed.isEmpty ? Set(projects.map(\.name)) : []
                 }
+                .help(collapsed.isEmpty ? "Collapse all projects" : "Expand all projects")
             }
-            PanelToggle(systemImage: "sidebar.right", help: showsDetail ? "Hide Details" : "Show Details") {
-                withAnimation(.easeInOut(duration: 0.2)) { showsDetail.toggle() }
+        }
+        ToolbarItem {
+            Button(showsDetail ? "Hide Inspector" : "Show Inspector", systemImage: "sidebar.right") {
+                withAnimation { showsDetail.toggle() }
             }
             .keyboardShortcut("0", modifiers: [.option, .command])
+            .help(showsDetail ? "Hide Inspector" : "Show Inspector")
         }
-        .font(.callout)
-        .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 6)
-        .padding(.leading, showsSidebar ? 0 : 70) // keep clear of the traffic lights
     }
 
     private var countLabel: String {
@@ -229,27 +193,25 @@ struct DashboardView: View {
         return "\(visible.count) shown\(hidden)"
     }
 
-    // A ScrollView rather than List: macOS List caches row heights and clips rows after filtering.
-    // Not lazy either: LazyVStack showed stale rows after an agent moved to another section.
+    // MARK: Content
+
+    // Rows have one fixed height: macOS List caches row heights and clipped rows whose height changed.
     private var agentList: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 2) {
-                    switch layout {
-                    case .byStatus: statusSections
-                    case .byProject: projectSections
-                    }
-                }
-                .padding(.horizontal, 12).padding(.bottom, 12)
+        List(selection: $selectedID) {
+            switch layout {
+            case .byStatus: statusSections
+            case .byProject: projectSections
             }
-            .focusable()
-            .focusEffectDisabled()
-            .onKeyPress(.upArrow) { moveSelection(-1, proxy); return .handled }
-            .onKeyPress(.downArrow) { moveSelection(1, proxy); return .handled }
-            .onKeyPress(.return) {
-                if let session = selected { model.focus(session) }
-                return .handled
+        }
+        .listStyle(.inset)
+        .contextMenu(forSelectionType: AgentSession.ID.self) { ids in
+            if let id = ids.first, let session = model.sessions[id] {
+                Button("Focus Terminal") { model.focus(session) }
+                Button("Copy Directory") { copy(session.cwd) }
+                Button("Copy Session ID") { copy(session.sessionID) }
             }
+        } primaryAction: { ids in
+            if let id = ids.first, let session = model.sessions[id] { model.focus(session) }
         }
         .overlay {
             if visible.isEmpty {
@@ -262,34 +224,17 @@ struct DashboardView: View {
         }
     }
 
-    /// Visible rows in display order, for arrow-key navigation.
-    private var orderedIDs: [AgentSession.ID] {
-        switch layout {
-        case .byStatus:
-            let groups = Dictionary(grouping: visible, by: \.status.group)
-            return AgentStatus.Group.allCases.flatMap { groups[$0] ?? [] }.map(\.id)
-        case .byProject:
-            return projects.filter { !collapsed.contains($0.name) }.flatMap(\.sessions).map(\.id)
-        }
-    }
-
-    private func moveSelection(_ delta: Int, _ proxy: ScrollViewProxy) {
-        let ids = orderedIDs
-        guard !ids.isEmpty else { return }
-        let index = selectedID.flatMap { ids.firstIndex(of: $0) }.map { $0 + delta } ?? (delta > 0 ? 0 : ids.count - 1)
-        selectedID = ids[min(max(index, 0), ids.count - 1)]
-        proxy.scrollTo(selectedID)
-    }
-
     @ViewBuilder
     private var statusSections: some View {
         let groups = Dictionary(grouping: visible, by: \.status.group)
         ForEach(AgentStatus.Group.allCases, id: \.self) { group in
             if let members = groups[group] {
-                SectionTitle(title: group.title, count: members.count, color: group.color)
-                    .padding(.horizontal, 10).padding(.top, 12).padding(.bottom, 4)
-                ForEach(members) { session in
-                    row(session) { StatusRow(session: session, selected: selectedID == session.id) }
+                Section {
+                    ForEach(members) { session in
+                        StatusRow(session: session)
+                    }
+                } header: {
+                    Text("\(group.title)  \(members.count)").foregroundStyle(group.color)
                 }
             }
         }
@@ -309,96 +254,35 @@ struct DashboardView: View {
         let endedByProject = Dictionary(grouping: scoped(all).filter { $0.status == .ended }, by: \.projectName)
         ForEach(projects, id: \.name) { project in
             let expanded = !collapsed.contains(project.name)
-            VStack(alignment: .leading, spacing: 2) {
+            Section {
+                if expanded {
+                    ForEach(project.sessions) { session in
+                        ProjectRow(session: session)
+                    }
+                }
+            } header: {
                 Button {
-                    if expanded { collapsed.insert(project.name) } else { collapsed.remove(project.name) }
+                    withAnimation { if expanded { collapsed.insert(project.name) } else { collapsed.remove(project.name) } }
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "chevron.right")
                             .font(.caption.weight(.semibold))
                             .rotationEffect(.degrees(expanded ? 90 : 0))
                             .foregroundStyle(.secondary)
-                            .frame(width: 12)
+                            .frame(width: 10)
                         ProjectHeader(name: project.name, sessions: project.sessions,
                                       endedHidden: status == nil ? endedByProject[project.name]?.count ?? 0 : 0)
                     }
-                    .padding(.horizontal, 6)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                if expanded {
-                    ForEach(project.sessions) { session in
-                        row(session) { ProjectRow(session: session, selected: selectedID == session.id) }
-                    }
-                }
             }
-            .padding(6)
-            .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
-            .padding(.top, 8)
         }
-    }
-
-    /// A selectable row: click selects, double-click (or Return) jumps to the terminal.
-    private func row<Content: View>(_ session: AgentSession, @ViewBuilder content: () -> Content) -> some View {
-        let isSelected = selectedID == session.id
-        return content()
-            .padding(.horizontal, 10)
-            .background {
-                RoundedRectangle(cornerRadius: 7).fill(
-                    isSelected ? Color.accentColor : session.needsYou ? Color.orange.opacity(0.12) : .clear)
-            }
-            .foregroundStyle(isSelected ? .white : .primary)
-            .contentShape(Rectangle())
-            .id(session.id)
-            .onTapGesture(count: 2) { model.focus(session) }
-            .simultaneousGesture(TapGesture().onEnded { selectedID = session.id })
-            .contextMenu {
-                Button("Focus Terminal") { model.focus(session) }
-                Button("Copy Directory") { copy(session.cwd) }
-                Button("Copy Session ID") { copy(session.sessionID) }
-            }
     }
 
     private func copy(_ text: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
-    }
-}
-
-private struct HeaderButton: View {
-    let title: String
-    var disabled = false
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Text(title).fontWeight(.medium)
-                .padding(.horizontal, 12).frame(height: 30)
-                .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(disabled)
-        .opacity(disabled ? 0.45 : 1)
-    }
-}
-
-/// Icon button that shows or hides a side panel.
-private struct PanelToggle: View {
-    let systemImage: String
-    let help: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: systemImage)
-                .foregroundStyle(.secondary)
-                .frame(width: 30, height: 30)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .focusEffectDisabled()
-        .help(help)
     }
 }
 
@@ -408,6 +292,14 @@ extension RemoteHosts.State? {
         case .connected: .green
         case .connecting, nil: .yellow
         case .failed: .red
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .connected: "Connected"
+        case .connecting, nil: "Connecting…"
+        case .failed(let error): "Not connected: \(error)"
         }
     }
 }
@@ -421,9 +313,10 @@ extension RemoteHosts.State {
 /// "Needs approval · Bash: npm test" plus the prompt (and turn time) underneath.
 private struct StatusText: View {
     let session: AgentSession
-    let selected: Bool
     /// The row's title, not repeated here.
     var title: String?
+    @Environment(\.backgroundProminence) private var prominence
+    private var selected: Bool { prominence == .increased }
 
     var body: some View {
         let secondary = [session.name, session.lastPrompt].compactMap { $0 }.first { $0 != title }
@@ -433,13 +326,13 @@ private struct StatusText: View {
             .compactMap { $0 }.joined(separator: " · ")
         VStack(alignment: .leading, spacing: 2) {
             (Text(session.status.label)
-                .foregroundColor(selected ? .white : session.status.color)
+                .foregroundColor(selected ? .primary : session.status.color)
                 .fontWeight(.medium)
              + Text(detail.map { " · \($0)" } ?? "")
-                .foregroundColor(selected ? .white : .primary.opacity(session.status.group == .idle ? 0.6 : 0.9)))
+                .foregroundColor(session.status.group == .idle ? .secondary : .primary))
                 .lineLimit(1)
             if !below.isEmpty {
-                Text(below).foregroundStyle(selected ? AnyShapeStyle(.white.opacity(0.8)) : AnyShapeStyle(.secondary)).lineLimit(1)
+                Text(below).foregroundStyle(.secondary).lineLimit(1)
             }
         }
         .font(.callout)
@@ -448,43 +341,44 @@ private struct StatusText: View {
 
 private struct TimeLabel: View {
     let session: AgentSession
-    let selected: Bool
+    @Environment(\.backgroundProminence) private var prominence
 
     var body: some View {
         Ticking { now in
             Text(Format.ago(session.statusSince, now: now))
                 .font(.callout.weight(session.needsYou ? .semibold : .regular))
-                .foregroundStyle(selected ? AnyShapeStyle(.white)
-                                 : session.needsYou ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+                .foregroundStyle(session.needsYou && prominence != .increased ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
                 .monospacedDigit()
         }
         .frame(width: 36, alignment: .trailing)
     }
 }
 
+/// Rows keep one height (see `agentList`).
+private let rowHeight: CGFloat = 36
+
 private struct StatusRow: View {
     let session: AgentSession
-    let selected: Bool
+    @Environment(\.backgroundProminence) private var prominence
+    private var selected: Bool { prominence == .increased }
 
     var body: some View {
         HStack(spacing: 12) {
             StatusDot(status: session.status)
             HStack(spacing: 5) {
-                Text(session.projectName).font(.body.weight(.semibold)).lineLimit(1)
+                Text(session.projectName).fontWeight(.semibold).lineLimit(1)
                 if let branch = session.branch {
-                    Text("/ \(branch)").foregroundStyle(selected ? AnyShapeStyle(.white.opacity(0.8)) : AnyShapeStyle(.secondary))
-                        .lineLimit(1)
+                    Text("/ \(branch)").foregroundStyle(.secondary).lineLimit(1)
                 }
                 SourceChip(source: session.source, onAccent: selected)
             }
             .frame(width: 220, alignment: .leading)
-            StatusText(session: session, selected: selected)
+            StatusText(session: session)
             Spacer(minLength: 8)
             HostChip(host: session.host, onAccent: selected)
-            TimeLabel(session: session, selected: selected)
+            TimeLabel(session: session)
         }
-        .frame(minHeight: 34)
-        .padding(.vertical, 8)
+        .frame(height: rowHeight)
         .opacity(session.status == .ended ? 0.6 : 1)
         .help(session.cwd)
     }
@@ -492,7 +386,8 @@ private struct StatusRow: View {
 
 private struct ProjectRow: View {
     let session: AgentSession
-    let selected: Bool
+    @Environment(\.backgroundProminence) private var prominence
+    private var selected: Bool { prominence == .increased }
 
     private var title: String { session.name ?? session.branch ?? session.source.displayName }
 
@@ -512,11 +407,11 @@ private struct ProjectRow: View {
                 }
             }
             .frame(width: 220, alignment: .leading)
-            StatusText(session: session, selected: selected, title: title)
+            StatusText(session: session, title: title)
             Spacer(minLength: 8)
-            TimeLabel(session: session, selected: selected)
+            TimeLabel(session: session)
         }
-        .padding(.vertical, 4)
+        .frame(height: rowHeight)
         .opacity(session.status == .ended ? 0.6 : 1)
         .help(session.cwd)
     }
