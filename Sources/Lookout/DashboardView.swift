@@ -54,15 +54,22 @@ struct DashboardView: View {
             get: { showsSidebar ? .all : .detailOnly },
             set: { showsSidebar = $0 != .detailOnly })) {
             sidebar
-                .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 260)
+                .frame(minWidth: 200) // the custom toolbar toggle otherwise lets the column shrink to the toolbar's width
+                .navigationSplitViewColumnWidth(min: 200, ideal: 210, max: 280)
+                .toolbar(removing: .sidebarToggle)
+                .toolbar {
+                    // Next to the traffic lights, as in Notes and Mail.
+                    ToolbarItem { sidebarToggle }
+                    if #available(macOS 26, *) {
+                        ToolbarSpacer(.flexible) // keeps the toggle by the traffic lights without shrinking the sidebar
+                    }
+                }
         } detail: {
             agentList
-                .navigationSplitViewColumnWidth(min: 460, ideal: 640)
                 .toolbar { toolbar }
         }
         .navigationTitle("Lookout")
         .navigationSubtitle(countLabel)
-        .searchable(text: $query, placement: .toolbar, prompt: "Project, prompt or command")
         .inspector(isPresented: $showsDetail) {
             Group {
                 if let session = selected {
@@ -73,6 +80,9 @@ struct DashboardView: View {
                 }
             }
             .inspectorColumnWidth(min: 280, ideal: 330, max: 440)
+            .toolbar {
+                ToolbarItem { inspectorToggle }
+            }
         }
     }
 
@@ -153,8 +163,21 @@ struct DashboardView: View {
 
     // MARK: Toolbar
 
+    private var sidebarToggle: some View {
+        Button(showsSidebar ? "Hide Sidebar" : "Show Sidebar", systemImage: "sidebar.left") {
+            withAnimation { showsSidebar.toggle() }
+        }
+        .keyboardShortcut("s", modifiers: [.control, .command])
+        .help(showsSidebar ? "Hide Sidebar" : "Show Sidebar")
+    }
+
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
+        ToolbarItem {
+            // An AppKit search field: .searchable always lands at the window's trailing edge, over the inspector.
+            SearchField(text: $query, prompt: "Search")
+                .frame(width: 180)
+        }
         ToolbarItem {
             Picker("Layout", selection: $layout) {
                 ForEach(Layout.allCases, id: \.self) { Text($0.rawValue).tag($0) }
@@ -176,13 +199,14 @@ struct DashboardView: View {
                 .help(collapsed.isEmpty ? "Collapse all projects" : "Expand all projects")
             }
         }
-        ToolbarItem {
-            Button(showsDetail ? "Hide Inspector" : "Show Inspector", systemImage: "sidebar.right") {
-                withAnimation { showsDetail.toggle() }
-            }
-            .keyboardShortcut("0", modifiers: [.option, .command])
-            .help(showsDetail ? "Hide Inspector" : "Show Inspector")
+    }
+
+    private var inspectorToggle: some View {
+        Button(showsDetail ? "Hide Inspector" : "Show Inspector", systemImage: "sidebar.right") {
+            withAnimation { showsDetail.toggle() }
         }
+        .keyboardShortcut("0", modifiers: [.option, .command])
+        .help(showsDetail ? "Hide Inspector" : "Show Inspector")
     }
 
     private var countLabel: String {
@@ -286,6 +310,35 @@ struct DashboardView: View {
     }
 }
 
+private struct SearchField: NSViewRepresentable {
+    @Binding var text: String
+    let prompt: String
+
+    func makeNSView(context: Context) -> NSSearchField {
+        let field = NSSearchField()
+        field.placeholderString = prompt
+        field.delegate = context.coordinator
+        field.target = context.coordinator // the clear button sends its action, not a text change
+        field.action = #selector(Coordinator.changed(_:))
+        return field
+    }
+
+    func updateNSView(_ field: NSSearchField, context: Context) {
+        if field.stringValue != text { field.stringValue = text }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
+
+    final class Coordinator: NSObject, NSSearchFieldDelegate {
+        let text: Binding<String>
+        init(text: Binding<String>) { self.text = text }
+        func controlTextDidChange(_ note: Notification) {
+            text.wrappedValue = (note.object as? NSSearchField)?.stringValue ?? ""
+        }
+        @objc func changed(_ field: NSSearchField) { text.wrappedValue = field.stringValue }
+    }
+}
+
 extension RemoteHosts.State? {
     var color: Color {
         switch self {
@@ -355,7 +408,7 @@ private struct TimeLabel: View {
 }
 
 /// Rows keep one height (see `agentList`).
-private let rowHeight: CGFloat = 36
+private let rowHeight: CGFloat = 40
 
 private struct StatusRow: View {
     let session: AgentSession
@@ -379,6 +432,7 @@ private struct StatusRow: View {
             TimeLabel(session: session)
         }
         .frame(height: rowHeight)
+        .padding(.vertical, 6).padding(.horizontal, 4)
         .opacity(session.status == .ended ? 0.6 : 1)
         .help(session.cwd)
     }
@@ -412,6 +466,7 @@ private struct ProjectRow: View {
             TimeLabel(session: session)
         }
         .frame(height: rowHeight)
+        .padding(.vertical, 6).padding(.horizontal, 4)
         .opacity(session.status == .ended ? 0.6 : 1)
         .help(session.cwd)
     }
