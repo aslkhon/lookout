@@ -13,6 +13,8 @@ struct DashboardView: View {
     enum HostFilter: Hashable { case all, local, remote(String) }
 
     @AppStorage("dashboardLayout") private var layout: Layout = .byStatus
+    @AppStorage("dashboardShowsSidebar") private var showsSidebar = true
+    @AppStorage("dashboardShowsDetail") private var showsDetail = true
     @State private var status: AgentStatus.Group?
     @State private var hostFilter: HostFilter = .all
     @State private var source: AgentSource?
@@ -50,26 +52,32 @@ struct DashboardView: View {
     var body: some View {
         // Fixed columns under a transparent title bar (the traffic lights sit over the sidebar).
         HStack(spacing: 0) {
-            sidebar
-                .frame(width: 190)
-                .padding(.top, 40)
-                .background(Color.primary.opacity(0.03))
-            Divider()
+            if showsSidebar {
+                sidebar
+                    .frame(width: 190)
+                    .padding(.top, 40)
+                    .background(Color.primary.opacity(0.03))
+                    .transition(.move(edge: .leading))
+                Divider()
+            }
             VStack(spacing: 0) {
                 contentHeader
                 agentList
             }
             .frame(minWidth: 480, maxWidth: .infinity)
-            Divider()
-            Group {
-                if let session = selected {
-                    AgentDetailView(session: session) { model.focus(session) }
-                } else {
-                    ContentUnavailableView("No Agent Selected", systemImage: "binoculars",
-                                           description: Text("Select an agent to see its details. Double-click to jump to its terminal."))
+            if showsDetail {
+                Divider()
+                Group {
+                    if let session = selected {
+                        AgentDetailView(session: session) { model.focus(session) }
+                    } else {
+                        ContentUnavailableView("No Agent Selected", systemImage: "binoculars",
+                                               description: Text("Select an agent to see its details. Double-click to jump to its terminal."))
+                    }
                 }
+                .frame(width: 330)
+                .transition(.move(edge: .trailing))
             }
-            .frame(width: 330)
         }
         .ignoresSafeArea()
     }
@@ -165,6 +173,10 @@ struct DashboardView: View {
 
     private var contentHeader: some View {
         HStack(spacing: 10) {
+            PanelToggle(systemImage: "sidebar.left", help: showsSidebar ? "Hide Sidebar" : "Show Sidebar") {
+                withAnimation(.easeInOut(duration: 0.2)) { showsSidebar.toggle() }
+            }
+            .keyboardShortcut("s", modifiers: [.control, .command])
             HStack(spacing: 2) {
                 ForEach(Layout.allCases, id: \.self) { option in
                     Button { layout = option } label: {
@@ -199,9 +211,14 @@ struct DashboardView: View {
                     collapsed = collapsed.isEmpty ? Set(projects.map(\.name)) : []
                 }
             }
+            PanelToggle(systemImage: "sidebar.right", help: showsDetail ? "Hide Details" : "Show Details") {
+                withAnimation(.easeInOut(duration: 0.2)) { showsDetail.toggle() }
+            }
+            .keyboardShortcut("0", modifiers: [.option, .command])
         }
         .font(.callout)
         .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 6)
+        .padding(.leading, showsSidebar ? 0 : 70) // keep clear of the traffic lights
     }
 
     private var countLabel: String {
@@ -363,6 +380,25 @@ private struct HeaderButton: View {
         .buttonStyle(.plain)
         .disabled(disabled)
         .opacity(disabled ? 0.45 : 1)
+    }
+}
+
+/// Icon button that shows or hides a side panel.
+private struct PanelToggle: View {
+    let systemImage: String
+    let help: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .foregroundStyle(.secondary)
+                .frame(width: 30, height: 30)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .focusEffectDisabled()
+        .help(help)
     }
 }
 
