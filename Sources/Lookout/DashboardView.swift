@@ -29,21 +29,38 @@ struct DashboardView: View {
 
     /// Sessions passing the host and agent filters (the status filter and ended agents aside).
     private func scoped(_ sessions: [AgentSession]) -> [AgentSession] {
-        sessions.filter { s in
-            let hostOK: Bool = switch hostFilter {
-            case .all: true
-            case .local: s.host == nil
-            case .remote(let host): s.host == host
-            }
-            return hostOK && (source == nil || s.source == source) && s.matches(query)
+        sessions.filter { inScope($0, host: hostFilter, source: source) }
+    }
+
+    private func inScope(_ s: AgentSession, host: HostFilter, source: AgentSource?) -> Bool {
+        let hostOK: Bool = switch host {
+        case .all: true
+        case .local: s.host == nil
+        case .remote(let name): s.host == name
         }
+        return hostOK && (source == nil || s.source == source) && s.matches(query)
+    }
+
+    /// Ended agents only show under their own filter.
+    private func hasStatus(_ s: AgentSession, _ status: AgentStatus.Group?) -> Bool {
+        status.map { s.status.group == $0 } ?? (s.status != .ended)
     }
 
     private var visible: [AgentSession] {
-        scoped(all).filter { s in
-            if let status { return s.status.group == status }
-            return s.status != .ended // ended agents only show under their own filter
-        }
+        all.filter { hasStatus($0, status) && inScope($0, host: hostFilter, source: source) }
+    }
+
+    // Sidebar counts: what the list would show for that row, with the other sections' current choices.
+    private func count(status: AgentStatus.Group?) -> Int {
+        all.filter { hasStatus($0, status) && inScope($0, host: hostFilter, source: source) }.count
+    }
+
+    private func count(host: HostFilter) -> Int {
+        all.filter { hasStatus($0, status) && inScope($0, host: host, source: source) }.count
+    }
+
+    private func count(source: AgentSource?) -> Int {
+        all.filter { hasStatus($0, status) && inScope($0, host: hostFilter, source: source) }.count
     }
 
     private var hiddenEnded: Int {
@@ -136,9 +153,9 @@ struct DashboardView: View {
     private var sidebar: some View {
         List {
             Section("Status") {
-                filterRow(.status(nil), "All Agents", count: all.count) { Image(systemName: "square.stack") }
+                filterRow(.status(nil), "All Agents", count: count(status: nil)) { Image(systemName: "square.stack") }
                 ForEach(AgentStatus.Group.allCases, id: \.self) { group in
-                    let count = all.filter { $0.status.group == group }.count
+                    let count = count(status: group)
                     filterRow(.status(group), group.title, count: count,
                               countColor: group == .needsYou && count > 0 ? .orange : .secondary) {
                         StatusDot(status: group.dotStatus, size: 8)
@@ -146,21 +163,21 @@ struct DashboardView: View {
                 }
             }
             Section("Hosts") {
-                filterRow(.host(.all), "All Hosts", count: all.count) { Image(systemName: "network") }
-                filterRow(.host(.local), "This Mac", count: all.filter { $0.host == nil }.count) {
+                filterRow(.host(.all), "All Hosts", count: count(host: .all)) { Image(systemName: "network") }
+                filterRow(.host(.local), "This Mac", count: count(host: .local)) {
                     Image(systemName: "desktopcomputer")
                 }
                 ForEach(remotes.hosts, id: \.self) { host in
-                    filterRow(.host(.remote(host)), host, count: all.filter { $0.host == host }.count) {
+                    filterRow(.host(.remote(host)), host, count: count(host: .remote(host))) {
                         Image(systemName: "globe").foregroundStyle(remotes.states[host].color)
                     }
                     .help(remotes.states[host].label)
                 }
             }
             Section("Agent") {
-                filterRow(.source(nil), "Any Agent", count: all.count) { Image(systemName: "circle.grid.2x1") }
+                filterRow(.source(nil), "Any Agent", count: count(source: nil)) { Image(systemName: "circle.grid.2x1") }
                 ForEach(AgentSource.allCases, id: \.self) { s in
-                    filterRow(.source(s), s.displayName, count: all.filter { $0.source == s }.count) {
+                    filterRow(.source(s), s.displayName, count: count(source: s)) {
                         AgentLogo(source: s)
                     }
                 }
