@@ -7,7 +7,7 @@ import SwiftUI
 struct MenuContentView: View {
     @ObservedObject var model: AppModel
     var openSetup: () -> Void
-    var openDashboard: () -> Void
+    @Environment(\.openWindow) private var openWindow
 
     @State private var listHeight: CGFloat = 0
     @State private var searching = false
@@ -175,7 +175,7 @@ struct MenuContentView: View {
 
     private var footer: some View {
         HStack(spacing: 16) {
-            footerButton("Open Window", shortcut: "⌘O") { closeMenu(); openDashboard() }
+            footerButton("Open Window", shortcut: "⌘O") { closeMenu(); NSApp.activate(); openWindow(id: "dashboard") }
                 .keyboardShortcut("o")
             footerButton("Setup…", shortcut: "⌘,") { closeMenu(); openSetup() }
                 .keyboardShortcut(",")

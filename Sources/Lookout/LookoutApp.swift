@@ -9,20 +9,39 @@ struct LookoutApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            MenuContentView(model: model, openSetup: { delegate.showSetup() }, openDashboard: { delegate.showDashboard() })
+            MenuContentView(model: model, openSetup: { delegate.showSetup() })
         } label: {
-            let count = model.attentionCount
-            Image(systemName: count > 0 ? "binoculars.fill" : "binoculars")
-            if count > 0 { Text("\(count)") }
+            MenuBarLabel(count: model.attentionCount)
         }
         .menuBarExtraStyle(.window)
+
+        // A SwiftUI window (not a hand-made NSWindow) so the sidebar runs full height behind the toolbar.
+        Window("Lookout", id: "dashboard") {
+            DashboardView(model: model, remotes: model.remotes, openSetup: { delegate.showSetup() })
+                .frame(minWidth: 760, minHeight: 420)
+                .onAppear { NSApp.setActivationPolicy(.regular) } // in the Dock and ⌘-Tab while open
+                .onDisappear { NSApp.setActivationPolicy(.accessory) }
+        }
+        .defaultSize(width: 980, height: 600)
+    }
+}
+
+private struct MenuBarLabel: View {
+    let count: Int
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Image(systemName: count > 0 ? "binoculars.fill" : "binoculars")
+            .onAppear { AppDelegate.openDashboard = { openWindow(id: "dashboard") } }
+        if count > 0 { Text("\(count)") }
     }
 }
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate {
     private var setupWindow: NSWindow?
-    private var dashboardWindow: NSWindow?
+    /// SwiftUI's openWindow for the dashboard, captured from the menu bar label.
+    static var openDashboard: (() -> Void)?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         _ = Notifier.shared // become the notification delegate before any click arrives
@@ -53,41 +72,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         setupWindow?.makeKeyAndOrderFront(nil)
     }
 
-    func showDashboard() {
-        if dashboardWindow == nil {
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 980, height: 600),
-                                  styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
-                                  backing: .buffered, defer: false)
-            window.title = "Lookout"
-            window.isReleasedWhenClosed = false
-            window.toolbarStyle = .unified
-            let hosting = NSHostingController(
-                rootView: DashboardView(model: AppModel.shared, remotes: AppModel.shared.remotes, openSetup: { [weak self] in self?.showSetup() }))
-            hosting.sizingOptions = [] // window size is user-controlled
-            hosting.sceneBridgingOptions = [.toolbars, .title]
-            window.contentViewController = hosting
-            window.setContentSize(NSSize(width: 980, height: 600))
-            window.contentMinSize = NSSize(width: 760, height: 420)
-            window.setFrameAutosaveName("LookoutDashboard")
-            window.delegate = self
-            if window.frame.origin == .zero { window.center() }
-            dashboardWindow = window
-        }
-        // Show in the Dock and ⌘-Tab while the window is open.
-        NSApp.setActivationPolicy(.regular)
-        NSApp.activate()
-        dashboardWindow?.makeKeyAndOrderFront(nil)
-    }
-
-    func windowWillClose(_ notification: Notification) {
-        if (notification.object as? NSWindow) === dashboardWindow {
-            NSApp.setActivationPolicy(.accessory)
-        }
-    }
-
     /// Clicking the Dock icon reopens the dashboard.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if !flag { showDashboard() }
+        if !flag { Self.openDashboard?() }
         return true
     }
 }
