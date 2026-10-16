@@ -959,6 +959,10 @@ private struct ConversationView: View {
                 ProgressView().controlSize(.small)
             }
         }
+        // Replies can quote web pages or files: only open web links, never file: or app schemes.
+        .environment(\.openURL, OpenURLAction { url in
+            ["http", "https"].contains(url.scheme?.lowercased() ?? "") ? .systemAction : .discarded
+        })
         // Reload whenever the agent reports something; find the file again only for a new agent.
         .task(id: "\(session.id) \(session.lastEventAt.timeIntervalSince1970)") { await reload() }
     }
