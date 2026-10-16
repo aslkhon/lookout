@@ -18,6 +18,7 @@ struct SetupView: View {
     @State private var notificationsAllowed: Bool?
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var confirmRemoveAll = false
+    @AppStorage(Notifier.soundKey) private var sound = "Default"
     /// Bumped after file changes so installed states are re-read.
     @State private var revision = 0
 
@@ -126,6 +127,18 @@ struct SetupView: View {
             } else {
                 Button("Send a test") { Notifier.shared.postTest() }
             }
+        }
+        Divider()
+        SetupRow(state: nil, title: "Notification sound", subtitle: "Plays with every Lookout notification.") {
+            Picker("", selection: $sound) {
+                Text("Default").tag("Default")
+                Text("None").tag("None")
+                Divider()
+                ForEach(Notifier.systemSounds, id: \.self) { Text($0).tag($0) }
+            }
+            .labelsHidden()
+            .fixedSize()
+            .onChange(of: sound) { _, name in NSSound(named: name)?.play() } // preview
         }
         Divider()
         SetupRow(state: nil, title: "Launch at login",
