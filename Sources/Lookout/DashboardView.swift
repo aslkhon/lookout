@@ -813,15 +813,7 @@ struct AgentDetailView: View {
                     .buttonStyle(.borderedProminent)
                 }
                 if session.needsYou { waitingBox }
-                if let prompt = session.lastPrompt {
-                    block("Last prompt") {
-                        Text(prompt)
-                            .textSelection(.enabled)
-                            .padding(10)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
-                    }
-                }
+                block("Conversation") { ConversationView(session: session) }
                 block("Details") { details }
             }
             .padding(20)
@@ -931,5 +923,161 @@ struct AgentDetailView: View {
                     .textSelection(.enabled).lineLimit(2).truncationMode(.middle)
             }
         }
+    }
+}
+
+/// The latest prompts, replies and tool calls, read from the agent's transcript file on this Mac.
+private struct ConversationView: View {
+    let session: AgentSession
+
+    /// nil until loaded; empty when there's no transcript to read.
+    @State private var entries: [TranscriptEntry]?
+    @State private var located: (id: String, url: URL?)?
+    @State private var showsAll = false
+    @State private var expanded: Set<Int> = []
+
+    private static let recent = 12
+
+    var body: some View {
+        Group {
+            if let entries, !entries.isEmpty {
+                // At least the last few entries, and always back to the latest prompt.
+                let lastPrompt = entries.lastIndex { $0.kind == .user } ?? entries.count
+                let shown = showsAll ? entries : Array(entries[min(max(entries.count - Self.recent, 0), lastPrompt)...])
+                VStack(alignment: .leading, spacing: 10) {
+                    if shown.count < entries.count {
+                        Button("Show \(entries.count - shown.count) earlier") { showsAll = true }
+                            .buttonStyle(.link).font(.callout)
+                    }
+                    ForEach(Self.runs(shown), id: \.first!.id) { run in
+                        if run.count > 1 { toolRun(run) } else { entry(run[0]) }
+                    }
+                }
+            } else if entries != nil {
+                fallback
+            } else {
+                ProgressView().controlSize(.small)
+            }
+        }
+        // Reload whenever the agent reports something; find the file again only for a new agent.
+        .task(id: "\(session.id) \(session.lastEventAt.timeIntervalSince1970)") { await reload() }
+    }
+
+    private func reload() async {
+        let session = session
+        if located?.id != session.id {
+            entries = nil; showsAll = false; expanded = []
+            let url = await Task.detached { Transcript.url(for: session) }.value
+            located = (session.id, url)
+        }
+        guard let url = located?.url else { entries = []; return }
+        entries = await Task.detached { Transcript.load(url, source: session.source, limit: 150) }.value
+    }
+
+    /// No transcript: remote agents (for now), or a Codex agent that hasn't sent a hook yet.
+    @ViewBuilder
+    private var fallback: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let prompt = session.lastPrompt {
+                Text(prompt)
+                    .textSelection(.enabled)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+            }
+            Text(session.host != nil ? "History for agents on ssh hosts isn't available yet."
+                                     : "No history found yet. It appears after the agent's next turn.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private func entry(_ entry: TranscriptEntry) -> some View {
+        switch entry.kind {
+        case .user:
+            Text(entry.text)
+                .lineLimit(expanded.contains(entry.id) ? nil : 6)
+                .textSelection(.enabled)
+                .padding(.horizontal, 10).padding(.vertical, 7)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.accentColor.opacity(0.15), in: RoundedRectangle(cornerRadius: 8))
+                .overlay(alignment: .bottomTrailing) { moreButton(entry) }
+        case .assistant:
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                AgentLogo(source: session.source, size: 12)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(Self.markdown(entry.text))
+                        .lineLimit(expanded.contains(entry.id) ? nil : 6)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    moreButton(entry)
+                }
+            }
+        case .tool:
+            HStack(spacing: 8) {
+                Image(systemName: entry.text.hasPrefix("Bash:") ? "terminal" : "wrench.and.screwdriver")
+                    .frame(width: 12)
+                Text(entry.text.prefix { $0 != "\n" })
+                    .lineLimit(1).truncationMode(.middle)
+            }
+            .font(.system(.caption, design: .monospaced))
+            .foregroundStyle(.secondary)
+            .help(entry.text)
+        }
+    }
+
+    /// Entries split so consecutive tool calls share one run; everything else stands alone.
+    private static func runs(_ entries: [TranscriptEntry]) -> [[TranscriptEntry]] {
+        entries.reduce(into: []) { runs, entry in
+            if entry.kind == .tool, runs.last?.last?.kind == .tool { runs[runs.count - 1].append(entry) }
+            else { runs.append([entry]) }
+        }
+    }
+
+    /// Several tool calls in a row, folded to a count and the latest call.
+    @ViewBuilder
+    private func toolRun(_ run: [TranscriptEntry]) -> some View {
+        let open = expanded.contains(run[0].id)
+        Button {
+            if open { expanded.remove(run[0].id) } else { expanded.insert(run[0].id) }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "chevron.right")
+                    .rotationEffect(.degrees(open ? 90 : 0))
+                    .frame(width: 12)
+                Text("\(run.count) tool calls").fontWeight(.medium)
+                if !open, let last = run.last {
+                    Text("· " + last.text.prefix { $0 != "\n" })
+                        .lineLimit(1).truncationMode(.middle)
+                }
+            }
+            .font(.system(.caption, design: .monospaced))
+            .foregroundStyle(.secondary)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        if open {
+            ForEach(run) { entry($0).padding(.leading, 20) }
+        }
+    }
+
+    /// "More"/"Less" for long messages.
+    @ViewBuilder
+    private func moreButton(_ entry: TranscriptEntry) -> some View {
+        let lines = entry.text.reduce(0) { $1 == "\n" ? $0 + 1 : $0 }
+        if entry.text.count > 320 || lines > 5 {
+            let open = expanded.contains(entry.id)
+            Button(open ? "Less" : "More") {
+                if open { expanded.remove(entry.id) } else { expanded.insert(entry.id) }
+            }
+            .buttonStyle(.link).font(.caption)
+            .padding(entry.kind == .user ? 4 : 0)
+        }
+    }
+
+    /// Inline Markdown (bold, code, links) as the agents write it; plain text if it doesn't parse.
+    private static func markdown(_ text: String) -> AttributedString {
+        (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+            ?? AttributedString(text)
     }
 }
