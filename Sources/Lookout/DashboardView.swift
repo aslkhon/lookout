@@ -371,7 +371,7 @@ struct DashboardView: View {
     private func projectHeader(_ project: Project, endedHidden: Int) -> some View {
         let expanded = !collapsed.contains(project.name)
         return Button {
-            withAnimation { if expanded { collapsed.insert(project.name) } else { collapsed.remove(project.name) } }
+            withAnimation(.snappy(duration: 0.2)) { if expanded { collapsed.insert(project.name) } else { collapsed.remove(project.name) } }
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "chevron.right")
