@@ -813,8 +813,8 @@ struct AgentDetailView: View {
                     .buttonStyle(.borderedProminent)
                 }
                 if session.needsYou { waitingBox }
-                block("Conversation") { ConversationView(session: session) }
                 block("Details") { details }
+                block("Conversation") { ConversationView(session: session) }
             }
             .padding(20)
             .frame(maxWidth: .infinity, alignment: .leading)
