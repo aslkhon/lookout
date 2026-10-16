@@ -18,7 +18,7 @@ struct LookoutApp: App {
         // A SwiftUI window (not a hand-made NSWindow) so the sidebar runs full height behind the toolbar.
         Window("Lookout", id: "dashboard") {
             DashboardView(model: model, remotes: model.remotes, openSetup: { delegate.showSetup() })
-                .frame(minWidth: 760, minHeight: 420)
+                .frame(minWidth: 380, minHeight: 300) // narrow enough to pin in a corner
                 .onAppear { NSApp.setActivationPolicy(.regular) } // in the Dock and ⌘-Tab while open
                 .onDisappear { NSApp.setActivationPolicy(.accessory) }
         }

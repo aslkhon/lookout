@@ -18,6 +18,7 @@ struct DashboardView: View {
     @State private var columns: NavigationSplitViewVisibility =
         UserDefaults.standard.object(forKey: "dashboardShowsSidebar") as? Bool == false ? .detailOnly : .all
     @AppStorage("dashboardShowsDetail") private var showsDetail = true
+    @AppStorage("dashboardOnTop") private var onTop = false
     @State private var status: AgentStatus.Group?
     @State private var hostFilter: HostFilter = .all
     @State private var source: AgentSource?
@@ -26,6 +27,12 @@ struct DashboardView: View {
     @State private var collapsed: Set<String> = []
     /// The project whose icon picker is open. Kept here: list rows are rebuilt as agents update.
     @State private var editingIcon: String?
+    @State private var listWidth: CGFloat = 0
+
+    /// Wide enough for project cards side by side; narrow enough for compact rows.
+    private static let gridWidth: CGFloat = 940
+    private static let compactWidth: CGFloat = 560
+    private var showsGrid: Bool { layout == .byProject && listWidth >= Self.gridWidth }
 
     private var all: [AgentSession] { model.sortedSessions }
 
@@ -96,6 +103,10 @@ struct DashboardView: View {
         .navigationTitle("Lookout")
         .onChange(of: columns) { showsSidebar = columns != .detailOnly }
         .navigationSubtitle(countLabel)
+        .background(FloatingWindow(floating: onTop))
+        .onChange(of: model.attentionCount, initial: true) { _, count in
+            NSApp.dockTile.badgeLabel = count > 0 ? "\(count)" : nil
+        }
         .inspector(isPresented: $showsDetail) {
             Group {
                 if let session = selected {
@@ -214,11 +225,6 @@ struct DashboardView: View {
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
         ToolbarItem {
-            // An AppKit search field: .searchable always lands at the window's trailing edge, over the inspector.
-            SearchField(text: $query, prompt: "Search")
-                .frame(width: 180)
-        }
-        ToolbarItem {
             Picker("Layout", selection: $layout) {
                 ForEach(Layout.allCases, id: \.self) { Text($0.rawValue).tag($0) }
             }
@@ -226,6 +232,7 @@ struct DashboardView: View {
             .labelsHidden()
             .help("Group agents by status or by project")
         }
+        ToolbarItem { pinToggle }
         ToolbarItem {
             if layout == .byStatus {
                 Button("Clear Ended", systemImage: "clear") { model.clearEnded() }
@@ -239,6 +246,18 @@ struct DashboardView: View {
                 .help(collapsed.isEmpty ? "Collapse all projects" : "Expand all projects")
             }
         }
+        ToolbarItem {
+            // An AppKit search field: .searchable always lands at the window's trailing edge, over the inspector.
+            // Last, so it's the first to overflow, and narrower when space is tight.
+            SearchField(text: $query, prompt: "Search")
+                .frame(width: listWidth < 760 ? 120 : 180)
+        }
+    }
+
+    private var pinToggle: some View {
+        Button(onTop ? "Don't Keep on Top" : "Keep on Top", systemImage: onTop ? "pin.fill" : "pin") { onTop.toggle() }
+            .keyboardShortcut("t", modifiers: [.option, .command])
+            .help(onTop ? "Stop keeping this window above other apps" : "Keep this window above other apps")
     }
 
     private var inspectorToggle: some View {
@@ -259,24 +278,13 @@ struct DashboardView: View {
 
     // MARK: Content
 
-    // Rows have one fixed height: macOS List caches row heights and clipped rows whose height changed.
     private var agentList: some View {
-        List(selection: $selectedID) {
-            switch layout {
-            case .byStatus: statusSections
-            case .byProject: projectSections
-            }
+        Group {
+            if showsGrid { projectGrid } else { list }
         }
-        .listStyle(.inset)
-        .contextMenu(forSelectionType: AgentSession.ID.self) { ids in
-            if let id = ids.first, let session = model.sessions[id] {
-                Button("Focus Terminal") { model.focus(session) }
-                Button("Copy Directory") { copy(session.cwd) }
-                Button("Copy Session ID") { copy(session.sessionID) }
-            }
-        } primaryAction: { ids in
-            if let id = ids.first, let session = model.sessions[id] { model.focus(session) }
-        }
+        .environment(\.compactRows, listWidth < Self.compactWidth)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { listWidth = $0 }
+        .background { shortcuts }
         .overlay {
             if visible.isEmpty {
                 ContentUnavailableView(all.isEmpty ? "No Agents Yet" : "Nothing Here",
@@ -286,6 +294,47 @@ struct DashboardView: View {
                                            : "No agents match these filters."))
             }
         }
+    }
+
+    // Rows have one fixed height: macOS List caches row heights and clipped rows whose height changed.
+    private var list: some View {
+        List(selection: $selectedID) {
+            switch layout {
+            case .byStatus: statusSections
+            case .byProject: projectSections
+            }
+        }
+        .listStyle(.inset)
+        .contextMenu(forSelectionType: AgentSession.ID.self) { ids in
+            if let id = ids.first, let session = model.sessions[id] { menu(for: session) }
+        } primaryAction: { ids in
+            if let id = ids.first, let session = model.sessions[id] { model.focus(session) }
+        }
+    }
+
+    @ViewBuilder
+    private func menu(for session: AgentSession) -> some View {
+        Button("Focus Terminal") { model.focus(session) }
+        Button("Copy Directory") { copy(session.cwd) }
+        Button("Copy Session ID") { copy(session.sessionID) }
+    }
+
+    /// ⌘1–⌘6 pick a status filter; Return focuses the selected agent (the list handles Return itself).
+    private var shortcuts: some View {
+        Group {
+            Button("All Agents") { status = nil }.keyboardShortcut("1")
+            ForEach(Array(AgentStatus.Group.allCases.enumerated()), id: \.offset) { index, group in
+                Button(group.title) { status = group }.keyboardShortcut(KeyEquivalent(Character("\(index + 2)")))
+            }
+            if showsGrid {
+                Button("Focus Terminal") { selected.map(model.focus) }
+                    .keyboardShortcut(.return, modifiers: [])
+                    .disabled(selected == nil)
+            }
+        }
+        .opacity(0)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 
     @ViewBuilder
@@ -304,55 +353,124 @@ struct DashboardView: View {
         }
     }
 
-    private var projects: [(name: String, sessions: [AgentSession])] {
+    private typealias Project = (name: String, sessions: [AgentSession])
+
+    private var projects: [Project] {
         // Alphabetical so projects stay put; agents inside still sort by status.
         Dictionary(grouping: visible, by: \.projectName)
             .map { ($0.key, $0.value) }
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
+    private var endedByProject: [String: Int] {
+        guard status == nil else { return [:] }
+        return Dictionary(grouping: scoped(all).filter { $0.status == .ended }, by: \.projectName).mapValues(\.count)
+    }
+
+    /// The project's header row: collapse chevron, icon, name, hosts and status counts.
+    private func projectHeader(_ project: Project, endedHidden: Int) -> some View {
+        let expanded = !collapsed.contains(project.name)
+        return Button {
+            withAnimation { if expanded { collapsed.insert(project.name) } else { collapsed.remove(project.name) } }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .rotationEffect(.degrees(expanded ? 90 : 0))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 10)
+                ProjectHeader(name: project.name, sessions: project.sessions, endedHidden: endedHidden) {
+                    editingIcon = project.name
+                }
+            }
+            .padding(.horizontal, 8).padding(.vertical, 4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
     /// Each project is one card: its header and agents share a rounded background.
     @ViewBuilder
     private var projectSections: some View {
-        let endedByProject = Dictionary(grouping: scoped(all).filter { $0.status == .ended }, by: \.projectName)
+        let ended = endedByProject
         ForEach(projects, id: \.name) { project in
-            let expanded = !collapsed.contains(project.name)
-            let rows = expanded ? project.sessions : []
+            let rows = collapsed.contains(project.name) ? [] : project.sessions
+            let alert = project.sessions.contains(where: \.needsYou)
             Section {
-                Button {
-                    withAnimation { if expanded { collapsed.insert(project.name) } else { collapsed.remove(project.name) } }
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.semibold))
-                            .rotationEffect(.degrees(expanded ? 90 : 0))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 10)
-                        ProjectHeader(name: project.name, sessions: project.sessions,
-                                      endedHidden: status == nil ? endedByProject[project.name]?.count ?? 0 : 0) {
-                            editingIcon = project.name
-                        }
-                    }
-                    .padding(.horizontal, 8).padding(.vertical, 4)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .selectionDisabled()
-                .listRowSeparator(.hidden)
-                .listRowBackground(CardPiece(top: true, bottom: rows.isEmpty))
+                projectHeader(project, endedHidden: ended[project.name] ?? 0)
+                    .selectionDisabled()
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(CardPiece(top: true, bottom: rows.isEmpty, alert: alert))
                 ForEach(rows) { session in
                     let last = session.id == rows.last?.id
                     ProjectRow(session: session)
                         .listRowSeparator(last ? .hidden : .visible)
-                        .listRowBackground(CardPiece(top: false, bottom: last))
+                        .listRowBackground(CardPiece(top: false, bottom: last, alert: alert))
                 }
             }
         }
     }
 
+    /// Wide windows: project cards two to a row, like a control panel.
+    private var projectGrid: some View {
+        let ended = endedByProject
+        let column = GridItem(.flexible(), spacing: 12, alignment: .top)
+        return ScrollView {
+            LazyVGrid(columns: [column, column], alignment: .leading, spacing: 12) {
+                ForEach(projects, id: \.name) { project in
+                    projectTile(project, endedHidden: ended[project.name] ?? 0)
+                }
+            }
+            .padding(16)
+        }
+        .environment(\.compactRows, true)
+    }
+
+    private func projectTile(_ project: Project, endedHidden: Int) -> some View {
+        let alert = project.sessions.contains(where: \.needsYou)
+        let rows = collapsed.contains(project.name) ? [] : project.sessions
+        return VStack(spacing: 0) {
+            projectHeader(project, endedHidden: endedHidden)
+                .padding(.vertical, 2)
+            ForEach(rows) { session in
+                Divider().padding(.leading, 12)
+                tileRow(session)
+            }
+        }
+        .padding(4)
+        .background(alert ? Color.orange.opacity(0.1) : Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 10))
+        .overlay {
+            if alert { RoundedRectangle(cornerRadius: 10).strokeBorder(.orange.opacity(0.6)) }
+        }
+    }
+
+    /// A grid row: click selects, double-click focuses the terminal, right-click for the menu.
+    private func tileRow(_ session: AgentSession) -> some View {
+        let isSelected = session.id == selectedID
+        return ProjectRow(session: session)
+            .environment(\.backgroundProminence, isSelected ? .increased : .standard)
+            .foregroundStyle(isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
+            .background(isSelected ? Color.accentColor : .clear, in: RoundedRectangle(cornerRadius: 6))
+            .contentShape(Rectangle())
+            .onTapGesture(count: 2) { model.focus(session) }
+            .simultaneousGesture(TapGesture().onEnded { selectedID = session.id })
+            .contextMenu { menu(for: session) }
+    }
+
     private func copy(_ text: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
+    }
+}
+
+/// Puts the hosting window above other apps' windows while `floating` is on.
+private struct FloatingWindow: NSViewRepresentable {
+    let floating: Bool
+
+    func makeNSView(context: Context) -> NSView { NSView() }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        DispatchQueue.main.async { view.window?.level = floating ? .floating : .normal } // the window isn't attached yet on first update
     }
 }
 
@@ -414,6 +532,8 @@ private struct StatusText: View {
     let session: AgentSession
     /// The row's title, not repeated here.
     var title: String?
+    /// Just the status line, for compact rows.
+    var oneLine = false
     @Environment(\.backgroundProminence) private var prominence
     private var selected: Bool { prominence == .increased }
 
@@ -430,7 +550,7 @@ private struct StatusText: View {
              + Text(detail.map { " · \($0)" } ?? "")
                 .foregroundColor(session.status.group == .idle ? .secondary : .primary))
                 .lineLimit(1)
-            if !below.isEmpty {
+            if !below.isEmpty && !oneLine {
                 Text(below).foregroundStyle(.secondary).lineLimit(1)
             }
         }
@@ -459,6 +579,7 @@ private let rowHeight: CGFloat = 40
 private struct StatusRow: View {
     let session: AgentSession
     @Environment(\.backgroundProminence) private var prominence
+    @Environment(\.compactRows) private var compact
     private var selected: Bool { prominence == .increased }
 
     var body: some View {
@@ -466,16 +587,25 @@ private struct StatusRow: View {
             StatusIcon(session: session)
             AgentLogo(source: session.source, size: 16)
                 .help(session.source.displayName)
-            HStack(spacing: 5) {
+            let title = HStack(spacing: 5) {
                 Text(session.projectName).fontWeight(.semibold).lineLimit(1)
                 if let branch = session.branch {
                     Text("/ \(branch)").foregroundStyle(.secondary).lineLimit(1)
                 }
             }
-            .frame(width: 220, alignment: .leading)
-            StatusText(session: session)
+            if compact {
+                VStack(alignment: .leading, spacing: 2) {
+                    title
+                    StatusText(session: session, oneLine: true)
+                }
+            } else {
+                title.frame(width: 220, alignment: .leading)
+                StatusText(session: session)
+            }
             Spacer(minLength: 8)
-            HostChip(host: session.host, onAccent: selected)
+            if !compact || session.host != nil {
+                HostChip(host: session.host, onAccent: selected)
+            }
             TimeLabel(session: session)
         }
         .frame(height: rowHeight)
@@ -488,6 +618,7 @@ private struct StatusRow: View {
 private struct ProjectRow: View {
     let session: AgentSession
     @Environment(\.backgroundProminence) private var prominence
+    @Environment(\.compactRows) private var compact
     private var selected: Bool { prominence == .increased }
 
     private var title: String { session.name ?? session.branch ?? session.source.displayName }
@@ -497,19 +628,26 @@ private struct ProjectRow: View {
             StatusIcon(session: session)
             AgentLogo(source: session.source, size: 16)
                 .help(session.source.displayName)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .fontWeight(.semibold).lineLimit(1)
-                HStack(spacing: 4) {
-                    if let host = session.host {
-                        Chip(text: host, style: selected ? .onAccent : .remote)
-                    } else if let app = session.appName {
-                        Chip(text: app, style: selected ? .onAccent : .neutral)
+            if compact {
+                VStack(alignment: .leading, spacing: 2) {
+                    ViewThatFits(in: .horizontal) { // the chip goes first when space runs out
+                        HStack(spacing: 6) {
+                            Text(title).fontWeight(.semibold).lineLimit(1).fixedSize()
+                            chip.fixedSize()
+                        }
+                        Text(title).fontWeight(.semibold).lineLimit(1)
                     }
+                    StatusText(session: session, title: title, oneLine: true)
                 }
+            } else {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .fontWeight(.semibold).lineLimit(1)
+                    HStack(spacing: 4) { chip }
+                }
+                .frame(width: 220, alignment: .leading)
+                StatusText(session: session, title: title)
             }
-            .frame(width: 220, alignment: .leading)
-            StatusText(session: session, title: title)
             Spacer(minLength: 8)
             TimeLabel(session: session)
         }
@@ -518,6 +656,20 @@ private struct ProjectRow: View {
         .opacity(session.status == .ended ? 0.6 : 1)
         .help(session.cwd)
     }
+
+    @ViewBuilder
+    private var chip: some View {
+        if let host = session.host {
+            Chip(text: host, style: selected ? .onAccent : .remote)
+        } else if let app = session.appName {
+            Chip(text: app, style: selected ? .onAccent : .neutral)
+        }
+    }
+}
+
+extension EnvironmentValues {
+    /// Narrow window or grid tile: rows stack their title over a one-line status.
+    @Entry var compactRows = false
 }
 
 private struct ProjectHeader: View {
@@ -550,8 +702,8 @@ private struct ProjectHeader: View {
             }
             .buttonStyle(.plain)
             .help("Set Icon")
-            Text(name).font(.body.weight(.semibold)).foregroundStyle(.primary)
-            ForEach(hosts, id: \.self) { HostChip(host: $0.isEmpty ? nil : $0) }
+            Text(name).font(.body.weight(.semibold)).foregroundStyle(.primary).fixedSize()
+            ForEach(hosts, id: \.self) { HostChip(host: $0.isEmpty ? nil : $0).fixedSize() }
             if cwds.count == 1, let cwd = cwds.first {
                 Text((cwd as NSString).abbreviatingWithTildeInPath)
                     .font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1)
@@ -580,11 +732,13 @@ private struct ProjectHeader: View {
 private struct CardPiece: View {
     let top: Bool
     let bottom: Bool
+    /// An agent in the project needs you: tint the card orange.
+    var alert = false
 
     var body: some View {
         UnevenRoundedRectangle(topLeadingRadius: top ? 10 : 0, bottomLeadingRadius: bottom ? 10 : 0,
                                bottomTrailingRadius: bottom ? 10 : 0, topTrailingRadius: top ? 10 : 0)
-            .fill(.primary.opacity(0.05))
+            .fill(alert ? AnyShapeStyle(.orange.opacity(0.1)) : AnyShapeStyle(.primary.opacity(0.05)))
             .padding(.top, top ? 4 : 0).padding(.bottom, bottom ? 4 : 0)
             .padding(.horizontal, 8)
     }
