@@ -226,11 +226,21 @@ struct DashboardView: View {
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
         ToolbarItem {
-            Picker("Layout", selection: $layout) {
+            let picker = Picker("Layout", selection: $layout) {
                 ForEach(Layout.allCases, id: \.self) { Text($0.rawValue).tag($0) }
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            // Narrow windows: an icon menu, since a segmented control in the toolbar's overflow menu loses its labels.
+            Group {
+                if searchInToolbar {
+                    picker.pickerStyle(.segmented).labelsHidden()
+                } else {
+                    Menu {
+                        picker.pickerStyle(.inline)
+                    } label: {
+                        Label(layout.rawValue, systemImage: layout == .byStatus ? "list.bullet" : "folder")
+                    }
+                }
+            }
             .help("Group agents by status or by project")
         }
         ToolbarItem { pinToggle }
