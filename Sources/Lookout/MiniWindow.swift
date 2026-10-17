@@ -2,7 +2,7 @@ import AppKit
 import LookoutCore
 import SwiftUI
 
-/// The floating mini window: one small tile per project, with a status icon per agent.
+/// The floating mini window: the project grid in small, every agent a row you can click.
 struct MiniView: View {
     @ObservedObject var model: AppModel
     var openDashboard: () -> Void
@@ -12,28 +12,33 @@ struct MiniView: View {
     var body: some View {
         let projects = Dictionary(grouping: model.sortedSessions.filter { $0.status != .ended }, by: \.projectName)
             .sorted { $0.key.localizedStandardCompare($1.key) == .orderedAscending }
-        VStack(alignment: .leading, spacing: 5) {
+        let columns = projects.count > 2 ? 2 : 1
+        HStack(alignment: .top, spacing: 6) {
             if projects.isEmpty {
                 Label("No agents", systemImage: "binoculars")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .padding(.horizontal, 8).padding(.vertical, 5)
+                    .font(.callout).foregroundStyle(.secondary)
+                    .padding(.horizontal, 12).padding(.vertical, 8)
             }
-            ForEach(projects, id: \.key) { name, sessions in
-                MiniTile(name: name, sessions: sessions, focus: { model.focus($0) })
-                    .onTapGesture(count: 2, perform: openDashboard)
+            ForEach(0..<columns, id: \.self) { column in
+                VStack(spacing: 6) {
+                    ForEach(projects.indices.filter { $0 % columns == column }, id: \.self) { i in
+                        MiniCard(name: projects[i].key, sessions: projects[i].value,
+                                 focus: { model.focus($0) }, openDashboard: openDashboard)
+                    }
+                }
             }
         }
         .padding(8)
         .fixedSize()
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
         .overlay(alignment: .topLeading) {
             if hovering {
                 Button(action: close) {
-                    Image(systemName: "xmark.circle.fill").font(.system(size: 12)).foregroundStyle(.secondary)
+                    Image(systemName: "xmark.circle.fill").font(.system(size: 13)).foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
                 .help("Close Mini Window")
-                .padding(2)
+                .padding(3)
             }
         }
         .onHover { hovering = $0 }
@@ -44,41 +49,84 @@ struct MiniView: View {
     }
 }
 
-private struct MiniTile: View {
+/// A project card: its header, then a row per agent. Click a row to jump to that agent's terminal.
+private struct MiniCard: View {
     let name: String
     let sessions: [AgentSession]
     let focus: (AgentSession) -> Void
+    let openDashboard: () -> Void
     @AppStorage private var color: String
+    @State private var hovered: AgentSession.ID?
 
-    init(name: String, sessions: [AgentSession], focus: @escaping (AgentSession) -> Void) {
-        self.name = name; self.sessions = sessions; self.focus = focus
+    init(name: String, sessions: [AgentSession], focus: @escaping (AgentSession) -> Void, openDashboard: @escaping () -> Void) {
+        self.name = name; self.sessions = sessions; self.focus = focus; self.openDashboard = openDashboard
         _color = ProjectStyle.color(for: name)
     }
 
     var body: some View {
-        HStack(spacing: 6) {
-            ProjectIcon(project: name).font(.caption).frame(width: 16)
-            Text(name)
-                .font(.caption.weight(.semibold))
-                .lineLimit(1)
-                .frame(maxWidth: 110, alignment: .leading)
-            Spacer(minLength: 6)
-            HStack(spacing: 3) {
-                ForEach(sessions) { session in
-                    StatusIcon(session: session, size: 13)
-                        .contentShape(Rectangle())
-                        .onTapGesture { focus(session) }
+        let alert = sessions.contains(where: \.needsYou)
+        VStack(spacing: 0) {
+            HStack(spacing: 5) {
+                ProjectIcon(project: name).font(.system(size: 12.5)).frame(width: 17)
+                Text(name).font(.system(size: 12.5, weight: .semibold)).lineLimit(1)
+                if alert {
+                    Text("Needs you")
+                        .font(.system(size: 11, weight: .semibold)).foregroundStyle(.white)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(.orange, in: Capsule())
+                        .fixedSize()
                 }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 6).padding(.vertical, 4)
+            .contentShape(Rectangle())
+            .onTapGesture(count: 2, perform: openDashboard)
+            ForEach(sessions) { session in
+                Divider().padding(.leading, 6)
+                MiniRow(session: session)
+                    .background(hovered == session.id ? Color.primary.opacity(0.08) : .clear,
+                                in: RoundedRectangle(cornerRadius: 6))
+                    .contentShape(Rectangle())
+                    .onHover { hovered = $0 ? session.id : (hovered == session.id ? nil : hovered) }
+                    .onTapGesture { focus(session) }
+                    .help("Click to jump to this agent's terminal")
             }
         }
-        .padding(.horizontal, 8).padding(.vertical, 5)
-        .frame(minWidth: 170, maxWidth: .infinity)
+        .padding(3)
+        .frame(width: 270)
         .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
         .overlay {
-            CardOutline(shape: RoundedRectangle(cornerRadius: 8), color: ProjectStyle.color(named: color),
-                        alert: sessions.contains(where: \.needsYou))
+            CardOutline(shape: RoundedRectangle(cornerRadius: 8), color: ProjectStyle.color(named: color), alert: alert)
         }
-        .help(name)
+    }
+}
+
+/// An agent in two small lines: its name, then its status and what it's doing.
+private struct MiniRow: View {
+    let session: AgentSession
+
+    private var title: String { session.name ?? session.branch ?? session.source.displayName }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            StatusIcon(session: session, size: 15)
+            AgentLogo(source: session.source, size: 14)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(title).font(.system(size: 12.5, weight: .semibold)).lineLimit(1)
+                (Text(session.status.label).foregroundColor(session.status.color)
+                 + Text(session.detail.map { " · \($0)" } ?? "").foregroundColor(.secondary))
+                    .font(.system(size: 12))
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 4)
+            Ticking { now in
+                Text(Format.ago(session.statusSince, now: now))
+                    .font(.system(size: 12, weight: session.needsYou ? .semibold : .regular))
+                    .foregroundStyle(session.needsYou ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+                    .monospacedDigit()
+            }
+        }
+        .padding(.horizontal, 6).padding(.vertical, 3)
     }
 }
 
@@ -128,28 +176,53 @@ extension AppDelegate {
 /// (The window frame autosave restored it on the wrong spot with several screens.)
 private final class MiniPanel: NSPanel {
     private static let topLeftKey = "miniWindowTopLeft"
+    /// The top-left corner to keep while the content changes size.
+    private var anchor: NSPoint?
+    /// Not placed by the user yet: hug this screen's top-right corner as the width changes.
+    private var defaultScreen: NSScreen?
+    private var placing = false
 
     override init(contentRect: NSRect, styleMask: NSWindow.StyleMask, backing: NSWindow.BackingStoreType, defer flag: Bool) {
         super.init(contentRect: contentRect, styleMask: styleMask, backing: backing, defer: flag)
-        NotificationCenter.default.addObserver(forName: NSWindow.didMoveNotification, object: self, queue: .main) { note in
-            guard let panel = note.object as? NSWindow else { return }
-            UserDefaults.standard.set(NSStringFromPoint(NSPoint(x: panel.frame.minX, y: panel.frame.maxY)), forKey: Self.topLeftKey)
+        let center = NotificationCenter.default
+        // A resize keeps the bottom-left corner, so it doesn't post a move: put the top-left back.
+        center.addObserver(forName: NSWindow.didResizeNotification, object: self, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                if let screen = self.defaultScreen { self.anchor = Self.topRight(of: screen, width: self.frame.width) }
+                if let anchor = self.anchor { self.place(anchor) }
+            }
+        }
+        center.addObserver(forName: NSWindow.didMoveNotification, object: self, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                if !self.placing { self.defaultScreen = nil } // dragged
+                let topLeft = NSPoint(x: self.frame.minX, y: self.frame.maxY)
+                self.anchor = topLeft
+                UserDefaults.standard.set(NSStringFromPoint(topLeft), forKey: Self.topLeftKey)
+            }
         }
     }
 
-    override func setFrame(_ frameRect: NSRect, display flag: Bool) {
-        var frame = frameRect
-        if frame.size != self.frame.size { frame.origin.y = self.frame.maxY - frame.height } // keep the top edge
-        super.setFrame(frame, display: flag)
-    }
-
-    /// Where the user left it, if that's still on a screen; else the top-right corner of the main screen.
+    /// Where the user left it, if that's still on a screen; else the top-right of the menu bar's screen.
     func restorePosition() {
         if let saved = UserDefaults.standard.string(forKey: Self.topLeftKey).map(NSPointFromString),
            NSScreen.screens.contains(where: { $0.frame.insetBy(dx: -1, dy: -1).contains(saved) }) {
-            setFrameTopLeftPoint(saved)
-        } else if let screen = NSScreen.main {
-            setFrameTopLeftPoint(NSPoint(x: screen.visibleFrame.maxX - frame.width - 20, y: screen.visibleFrame.maxY - 20))
+            anchor = saved
+        } else if let screen = NSScreen.screens.first {
+            defaultScreen = screen
+            anchor = Self.topRight(of: screen, width: frame.width)
         }
+        if let anchor { place(anchor) }
+    }
+
+    private func place(_ topLeft: NSPoint) {
+        placing = true
+        setFrameTopLeftPoint(topLeft)
+        placing = false
+    }
+
+    private static func topRight(of screen: NSScreen, width: CGFloat) -> NSPoint {
+        NSPoint(x: screen.visibleFrame.maxX - width - 20, y: screen.visibleFrame.maxY - 20)
     }
 }
