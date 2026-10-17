@@ -44,12 +44,13 @@ public enum Transcript {
 
     /// The last `limit` entries of a transcript. Reads backwards a chunk at a time, up to `maxBytes`,
     /// since lines holding screenshots or long tool output can be megabytes each; those are skipped.
+    /// Entry ids come from each line's byte offset, so they stay the same as the file grows.
     public static func load(_ url: URL, source: AgentSource, limit: Int = 40,
                             chunk: Int = 1 << 20, maxBytes: Int = 32 << 20, maxLine: Int = 256 << 10) -> [TranscriptEntry] {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return [] }
         defer { try? handle.close() }
         var offset = (try? handle.seekToEnd()) ?? 0
-        var newestFirst: [[Found]] = []
+        var newestFirst: [[TranscriptEntry]] = []
         var count = 0
         var read = 0
         var partial = Data() // the start of a line that began before the chunk read last
@@ -59,16 +60,19 @@ public enum Transcript {
             try? handle.seek(toOffset: offset)
             guard let data = try? handle.read(upToCount: Int(size)) else { break }
             read += data.count
-            var parts = (data + partial).split(separator: UInt8(ascii: "\n"), omittingEmptySubsequences: false)
+            let joined = data + partial
+            var parts = joined.split(separator: UInt8(ascii: "\n"), omittingEmptySubsequences: false)
             partial = offset > 0 ? Data(parts.removeFirst()) : Data()
             for part in parts.reversed() where !part.isEmpty && part.count <= maxLine {
-                let found = entries(in: Data(part), source: source)
+                let line = Int(offset) + part.startIndex - joined.startIndex
+                let found = entries(in: Data(part), source: source).enumerated().map { i, e in
+                    TranscriptEntry(id: line * 64 + i, kind: e.kind, text: e.text, date: e.date)
+                }
                 count += found.count
                 newestFirst.append(found)
             }
         }
-        let entries = newestFirst.reversed().flatMap { $0 }.suffix(limit)
-        return entries.enumerated().map { TranscriptEntry(id: $0.offset, kind: $0.element.kind, text: $0.element.text, date: $0.element.date) }
+        return Array(newestFirst.reversed().flatMap { $0 }.suffix(limit))
     }
 
     public static func parse(_ lines: [Data], source: AgentSource) -> [TranscriptEntry] {

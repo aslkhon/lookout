@@ -327,7 +327,10 @@ struct DashboardView: View {
                 Button(group.title) { status = group }.keyboardShortcut(KeyEquivalent(Character("\(index + 2)")))
             }
             if showsGrid {
-                Button("Focus Terminal") { selected.map(model.focus) }
+                Button("Focus Terminal") {
+                    // Not while typing in the search field: Return there just ends editing.
+                    if !(NSApp.keyWindow?.firstResponder is NSText) { selected.map(model.focus) }
+                }
                     .keyboardShortcut(.return, modifiers: [])
                     .disabled(selected == nil)
             }
@@ -963,7 +966,7 @@ private struct ConversationView: View {
         .environment(\.openURL, OpenURLAction { url in
             ["http", "https"].contains(url.scheme?.lowercased() ?? "") ? .systemAction : .discarded
         })
-        // Reload whenever the agent reports something; find the file again only for a new agent.
+        // Reload whenever the agent reports something; look for the file again until it's found.
         .task(id: "\(session.id) \(session.lastEventAt.timeIntervalSince1970)") { await reload() }
     }
 
@@ -971,6 +974,9 @@ private struct ConversationView: View {
         let session = session
         if located?.id != session.id {
             entries = nil; showsAll = false; expanded = []
+            located = nil
+        }
+        if located?.url == nil { // a new Claude session has no file until its first prompt
             let url = await Task.detached { Transcript.url(for: session) }.value
             located = (session.id, url)
         }

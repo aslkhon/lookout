@@ -44,5 +44,15 @@ struct TranscriptTests {
         #expect(entries.map(\.text) == (196...200).map { "prompt \($0)" })
         #expect(Transcript.load(url, source: .claude, limit: 500, chunk: 100).count == 200)
         #expect(Transcript.load(url, source: .claude, limit: 5, maxLine: 10).isEmpty) // every line too long
+
+        // Ids don't shift when the file grows.
+        let before = Transcript.load(url, source: .claude, limit: 5, chunk: 100)
+        let handle = try FileHandle(forWritingTo: url)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data("\n{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"prompt 201\"}}".utf8))
+        try handle.close()
+        let after = Transcript.load(url, source: .claude, limit: 5, chunk: 100)
+        #expect(after.map(\.text).last == "prompt 201")
+        #expect(Array(before.dropFirst()) == Array(after.dropLast()))
     }
 }
