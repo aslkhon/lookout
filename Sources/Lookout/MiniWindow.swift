@@ -7,23 +7,25 @@ struct MiniView: View {
     @ObservedObject var model: AppModel
     var openDashboard: () -> Void
     var close: () -> Void
-    @State private var hovering = false
 
     var body: some View {
         let projects = Dictionary(grouping: model.sortedSessions.filter { $0.status != .ended }, by: \.projectName)
             .sorted { $0.key.localizedStandardCompare($1.key) == .orderedAscending }
         let columns = projects.count > 2 ? 2 : 1
-        HStack(alignment: .top, spacing: 6) {
-            if projects.isEmpty {
-                Label("No agents", systemImage: "binoculars")
-                    .font(.callout).foregroundStyle(.secondary)
-                    .padding(.horizontal, 12).padding(.vertical, 8)
-            }
-            ForEach(0..<columns, id: \.self) { column in
-                VStack(spacing: 6) {
-                    ForEach(projects.indices.filter { $0 % columns == column }, id: \.self) { i in
-                        MiniCard(name: projects[i].key, sessions: projects[i].value,
-                                 focus: { model.focus($0) }, openDashboard: openDashboard)
+        VStack(alignment: .leading, spacing: 6) {
+            titleBar
+            HStack(alignment: .top, spacing: 6) {
+                if projects.isEmpty {
+                    Label("No agents", systemImage: "binoculars")
+                        .font(.callout).foregroundStyle(.secondary)
+                        .padding(.horizontal, 12).padding(.vertical, 8)
+                }
+                ForEach(0..<columns, id: \.self) { column in
+                    VStack(spacing: 6) {
+                        ForEach(projects.indices.filter { $0 % columns == column }, id: \.self) { i in
+                            MiniCard(name: projects[i].key, sessions: projects[i].value,
+                                     focus: { model.focus($0) }, openDashboard: openDashboard)
+                        }
                     }
                 }
             }
@@ -31,21 +33,29 @@ struct MiniView: View {
         .padding(8)
         .fixedSize()
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(alignment: .topLeading) {
-            if hovering {
-                Button(action: close) {
-                    Image(systemName: "xmark.circle.fill").font(.system(size: 13)).foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .help("Close Mini Window")
-                .padding(3)
-            }
-        }
-        .onHover { hovering = $0 }
         .contextMenu {
+            Button("Back to the Full Window") { close(); openDashboard() }
             Button("Open Dashboard", action: openDashboard)
             Button("Close Mini Window", action: close)
         }
+    }
+
+    /// Always visible: the panel never becomes key, so it gets no hover events to reveal buttons with.
+    private var titleBar: some View {
+        HStack(spacing: 10) {
+            Label("Lookout", systemImage: "binoculars").font(.system(size: 11, weight: .medium))
+            Spacer(minLength: 0)
+            Button { close(); openDashboard() } label: {
+                Image(systemName: "arrow.up.left.and.arrow.down.right")
+            }
+            .help("Back to the Full Window")
+            Button(action: close) { Image(systemName: "xmark") }
+                .help("Close Mini Window")
+        }
+        .buttonStyle(.plain)
+        .font(.system(size: 11, weight: .semibold))
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 4)
     }
 }
 
@@ -56,7 +66,6 @@ private struct MiniCard: View {
     let focus: (AgentSession) -> Void
     let openDashboard: () -> Void
     @AppStorage private var color: String
-    @State private var hovered: AgentSession.ID?
 
     init(name: String, sessions: [AgentSession], focus: @escaping (AgentSession) -> Void, openDashboard: @escaping () -> Void) {
         self.name = name; self.sessions = sessions; self.focus = focus; self.openDashboard = openDashboard
@@ -84,16 +93,13 @@ private struct MiniCard: View {
             ForEach(sessions) { session in
                 Divider().padding(.leading, 6)
                 MiniRow(session: session)
-                    .background(hovered == session.id ? Color.primary.opacity(0.08) : .clear,
-                                in: RoundedRectangle(cornerRadius: 6))
                     .contentShape(Rectangle())
-                    .onHover { hovered = $0 ? session.id : (hovered == session.id ? nil : hovered) }
                     .onTapGesture { focus(session) }
                     .help("Click to jump to this agent's terminal")
             }
         }
         .padding(3)
-        .frame(width: 270)
+        .frame(width: 203)
         .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
         .overlay {
             CardOutline(shape: RoundedRectangle(cornerRadius: 8), color: ProjectStyle.color(named: color), alert: alert)
