@@ -65,7 +65,7 @@ public enum Transcript {
             partial = offset > 0 ? Data(parts.removeFirst()) : Data()
             for part in parts.reversed() where !part.isEmpty && part.count <= maxLine {
                 let line = Int(offset) + part.startIndex - joined.startIndex
-                let found = entries(in: Data(part), source: source).enumerated().map { i, e in
+                let found = entries(in: Data(part), source: source).prefix(64).enumerated().map { i, e in // ids are offset * 64 + i
                     TranscriptEntry(id: line * 64 + i, kind: e.kind, text: e.text, date: e.date)
                 }
                 count += found.count
@@ -81,7 +81,7 @@ public enum Transcript {
             guard let tab = line.firstIndex(of: UInt8(ascii: "\t")),
                   let offset = Int(String(decoding: line[..<tab], as: UTF8.self)),
                   (0..<Int.max / 64).contains(offset) else { return [] } // the host's output isn't trusted
-            return entries(in: Data(line[line.index(after: tab)...]), source: source).enumerated().map { i, e in
+            return entries(in: Data(line[line.index(after: tab)...]), source: source).prefix(64).enumerated().map { i, e in
                 TranscriptEntry(id: offset * 64 + i, kind: e.kind, text: e.text, date: e.date)
             }
         }
