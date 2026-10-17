@@ -746,6 +746,7 @@ private struct ProjectHeader: View {
                 if let count = counts[group] {
                     HStack(spacing: 4) {
                         StatusDot(status: group.dotStatus, size: 6)
+                            .padding(.horizontal, group.dotStatus == .working ? 3.5 : 0) // room for its halo
                         Text("\(count)")
                     }
                     .foregroundStyle(group == .needsYou ? .orange : .secondary)
