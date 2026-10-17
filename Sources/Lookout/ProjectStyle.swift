@@ -134,11 +134,12 @@ struct ProjectStylePicker: View {
 
     private static let suggestions = ["🚀", "🧠", "📞", "💬", "🛒", "💳", "📊", "📈", "🔭", "🛠️", "🧪", "🤖",
                                       "🌐", "📱", "🖥️", "🗄️", "🔒", "📦", "🎨", "📝", "🎧", "🎬", "🏦", "⚡️"]
+    private static let columns = Array(repeating: GridItem(.fixed(28), spacing: 4), count: 8)
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Icon and color for \(project)").font(.headline)
-            LazyVGrid(columns: Array(repeating: GridItem(.fixed(28), spacing: 4), count: 8), spacing: 4) {
+            LazyVGrid(columns: Self.columns, spacing: 4) {
                 ForEach(Self.suggestions, id: \.self) { emoji in
                     Button { icon = emoji } label: {
                         Text(emoji).font(.title3).frame(width: 28, height: 28)
@@ -148,7 +149,7 @@ struct ProjectStylePicker: View {
                     .buttonStyle(.plain)
                 }
             }
-            HStack(spacing: 6) {
+            LazyVGrid(columns: Self.columns, spacing: 4) { // a single row is wider than the picker
                 swatch(name: "", fill: Color.clear).overlay(Image(systemName: "slash.circle").foregroundStyle(.secondary))
                     .help("No color")
                 ForEach(ProjectStyle.colors, id: \.name) { swatch(name: $0.name, fill: $0.color).help($0.name.capitalized) }
