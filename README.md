@@ -4,6 +4,13 @@ A macOS menu bar app that shows the state of every Claude Code and Codex agent o
 working, needs approval, needs input, or finished. It notifies you when one needs attention,
 and clicking an agent jumps to its terminal. You keep launching agents however you like.
 
+![The dashboard, by project](docs/images/dashboard.png)
+
+<p>
+  <img src="docs/images/menu.png" alt="The menu bar panel" width="300">
+  <img src="docs/images/compact.png" alt="Compact mode" width="330">
+</p>
+
 ## Install
 
 ```sh
@@ -26,6 +33,7 @@ To uninstall, remove the hooks first (**Setup… → Remove Hooks**), then run
 ./scripts/build-app.sh      # → build/Lookout.app + build/Lookout-<version>.zip (universal, ad-hoc signed)
 open build/Lookout.app
 swift test                  # state machine + installer tests (replays real hook payloads)
+./scripts/screenshots.sh    # the dev build with made-up agents, for the screenshots above
 ```
 
 On first launch Lookout shows a setup window that:
@@ -39,7 +47,13 @@ Existing hooks are kept, and each file is backed up as `<file>.lookout-backup-<t
 To remove the hooks, open **Setup… → Remove Hooks**.
 
 Clicking an agent jumps to its terminal. **Open Window** in the menu opens a dashboard, which
-filters agents by status or project and shows details for the selected one.
+filters agents by status or project and shows details for the selected one. Projects can have
+their own icon and border color.
+
+![The dashboard, by status](docs/images/by-status.png)
+
+**Compact mode** (⇧⌘M, or **Mini** in the menu) swaps the dashboard for a small window that floats
+above other apps: your projects, with a row per agent that jumps to its terminal when clicked.
 
 ## Remote hosts (ssh)
 

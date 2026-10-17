@@ -32,6 +32,10 @@ final class AppModel: ObservableObject {
     var needsSetup: Bool { !installer.isInstalled(.claude) && !installer.isInstalled(.codex) }
 
     func start() {
+        if Demo.isOn {
+            sessions = Dictionary(uniqueKeysWithValues: Demo.sessions().map { ($0.id, $0) })
+            return
+        }
         installHookBinary()
         VSCodeExtension.upgradeInstalled()
         let server = EventServer(path: LookoutPaths.socket.path) { data in

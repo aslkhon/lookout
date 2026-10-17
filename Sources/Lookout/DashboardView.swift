@@ -418,6 +418,7 @@ struct DashboardView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .focusable(false) // its focus ring drew over the card's edge
     }
 
     /// Each project is one card: its header and agents share a rounded background.
