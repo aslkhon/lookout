@@ -104,7 +104,7 @@ struct StatusDot: View {
 }
 
 /// Animated status for agent rows: a spinning ring while working, a pulse when it needs you,
-/// and an occasional bounce when finished or idle (staggered per agent so rows don't move together).
+/// and an occasional bounce when finished (staggered per agent so rows don't move together).
 struct StatusIcon: View {
     let session: AgentSession
     var size: CGFloat = 15
@@ -115,11 +115,13 @@ struct StatusIcon: View {
             switch session.status {
             case .working: spinner
             case .needsApproval, .needsInput:
-                Image(systemName: "exclamationmark.circle.fill")
-                    .foregroundStyle(.orange)
-                    .symbolEffect(.pulse, isActive: !reduceMotion)
+                Pulsing(pulsing: !reduceMotion, range: 0.4...1) {
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .font(.system(size: size - 1))
+                        .foregroundStyle(.orange)
+                }
             case .finished: occasional("checkmark.circle.fill", color: .purple, every: 7)
-            case .idle: occasional("moon.zzz.fill", color: .gray, every: 13)
+            case .idle: Image(systemName: "moon.zzz.fill").foregroundStyle(.gray) // still: each bounce relays out the window
             case .ended: StatusDot(status: .ended)
             }
         }
@@ -129,17 +131,7 @@ struct StatusIcon: View {
     }
 
     private var spinner: some View {
-        TimelineView(.animation(minimumInterval: 1 / 30, paused: reduceMotion)) { context in
-            let angle = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.2) / 1.2 * 360
-            ZStack {
-                Circle().stroke(Color.green.opacity(0.25), lineWidth: 2)
-                Circle().trim(from: 0, to: 0.3)
-                    .stroke(Color.green, style: StrokeStyle(lineWidth: 2, lineCap: .round))
-                    .rotationEffect(.degrees(angle))
-                Circle().fill(Color.green).frame(width: size * 0.35, height: size * 0.35)
-            }
-            .padding(1)
-        }
+        Spinner(spinning: !reduceMotion).padding(1)
     }
 
     /// A symbol that bounces once every `every` seconds, offset per agent.
@@ -150,6 +142,78 @@ struct StatusIcon: View {
                 .foregroundStyle(color)
                 .symbolEffect(.bounce, value: reduceMotion ? 0 : context.date.timeIntervalSinceReferenceDate)
         }
+    }
+}
+
+/// A green ring with a turning arc. Core Animation turns it: redrawing it from SwiftUI every frame
+/// made the whole window lay out again each time, which kept a CPU core busy.
+private struct Spinner: NSViewRepresentable {
+    let spinning: Bool
+
+    func makeNSView(context: Context) -> SpinnerView { SpinnerView() }
+
+    func updateNSView(_ view: SpinnerView, context: Context) {
+        view.spinning = spinning
+    }
+}
+
+private final class SpinnerView: NSView {
+    private let track = CAShapeLayer()
+    private let arc = CAShapeLayer()
+    private let dot = CAShapeLayer()
+    var spinning = true { didSet { if spinning != oldValue { updateAnimation() } } }
+
+    init() {
+        super.init(frame: .zero)
+        wantsLayer = true
+        let green = NSColor.systemGreen.cgColor
+        track.strokeColor = NSColor.systemGreen.withAlphaComponent(0.25).cgColor
+        arc.strokeColor = green
+        arc.lineCap = .round
+        arc.strokeEnd = 0.3
+        for ring in [track, arc] {
+            ring.fillColor = nil
+            ring.lineWidth = 2
+        }
+        dot.fillColor = green
+        [track, arc, dot].forEach(layer!.addSublayer)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func layout() {
+        super.layout()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        let side = min(bounds.width, bounds.height)
+        let box = CGRect(x: bounds.midX - side / 2, y: bounds.midY - side / 2, width: side, height: side)
+        for ring in [track, arc] {
+            ring.frame = box
+            ring.path = CGPath(ellipseIn: CGRect(origin: .zero, size: box.size), transform: nil)
+        }
+        let d = side * 0.35
+        dot.frame = box
+        dot.path = CGPath(ellipseIn: CGRect(x: (side - d) / 2, y: (side - d) / 2, width: d, height: d), transform: nil)
+        CATransaction.commit()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        updateAnimation()
+    }
+
+    private func updateAnimation() {
+        arc.removeAnimation(forKey: "spin")
+        guard spinning, window != nil else { return }
+        let spin = CABasicAnimation(keyPath: "transform.rotation.z")
+        spin.fromValue = 0
+        spin.toValue = -2 * Double.pi // clockwise
+        spin.duration = 1.2
+        spin.repeatCount = .infinity
+        spin.isRemovedOnCompletion = false
+        arc.add(spin, forKey: "spin")
     }
 }
 

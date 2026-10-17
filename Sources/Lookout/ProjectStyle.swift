@@ -52,17 +52,69 @@ struct CardOutline<S: InsettableShape>: View {
         ZStack {
             if let color { shape.strokeBorder(color.opacity(0.85), lineWidth: 1.5) }
             if alert {
-                TimelineView(.animation(minimumInterval: 1 / 20, paused: reduceMotion)) { context in
-                    let t = context.date.timeIntervalSinceReferenceDate
-                    let pulse = reduceMotion ? 0.8 : 0.3 + 0.6 * (0.5 + 0.5 * sin(t * 2 * .pi / 1.8))
-                    // Just outside the card's own border, so its color still shows.
-                    shape.strokeBorder(Color.orange.opacity(pulse), lineWidth: 2)
+                // Just outside the card's own border, so its color still shows.
+                Pulsing(pulsing: !reduceMotion, margin: 12) {
+                    shape.strokeBorder(Color.orange, lineWidth: 2)
                         .padding(color == nil ? 0 : -2.5)
-                        .shadow(color: .orange.opacity(pulse), radius: 6)
+                        .shadow(color: .orange, radius: 6)
                 }
+                .padding(-12)
             }
         }
         .allowsHitTesting(false)
+    }
+}
+
+/// Fades its content in and out with Core Animation, in step with every other `Pulsing`
+/// (redrawing from SwiftUI every frame relaid out the whole window each time).
+/// The content is hosted separately, so it doesn't inherit the environment (font, colors).
+struct Pulsing<Content: View>: NSViewRepresentable {
+    let pulsing: Bool
+    /// Opacity at the dim and bright ends; it rests at the bright one when not pulsing.
+    var range: ClosedRange<Float> = 0.3...0.9
+    /// Room for drawing past the frame, like a glow; the caller pads by minus this.
+    var margin: CGFloat = 0
+    @ViewBuilder let content: Content
+
+    func makeNSView(context: Context) -> PulsingView<AnyView> {
+        let view = PulsingView(rootView: AnyView(content.padding(margin)))
+        view.range = range
+        return view
+    }
+
+    func updateNSView(_ view: PulsingView<AnyView>, context: Context) {
+        view.rootView = AnyView(content.padding(margin))
+        view.pulsing = pulsing
+    }
+}
+
+final class PulsingView<Content: View>: NSHostingView<Content> {
+    private static var period: CFTimeInterval { 1.8 }
+    var range: ClosedRange<Float> = 0.3...0.9
+    var pulsing = true { didSet { if pulsing != oldValue { updateAnimation() } } }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        updateAnimation()
+    }
+
+    private func updateAnimation() {
+        guard let layer else { return }
+        layer.removeAnimation(forKey: "pulse")
+        layer.opacity = pulsing ? range.lowerBound : range.upperBound
+        guard pulsing, window != nil else { return }
+        let pulse = CABasicAnimation(keyPath: "opacity")
+        pulse.fromValue = range.lowerBound
+        pulse.toValue = range.upperBound
+        pulse.duration = Self.period / 2
+        pulse.autoreverses = true
+        pulse.repeatCount = .infinity
+        pulse.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        pulse.timeOffset = CACurrentMediaTime().truncatingRemainder(dividingBy: Self.period) // same phase everywhere
+        pulse.isRemovedOnCompletion = false
+        layer.add(pulse, forKey: "pulse")
     }
 }
 
