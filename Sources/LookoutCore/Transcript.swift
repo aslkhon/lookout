@@ -79,7 +79,8 @@ public enum Transcript {
     public static func parseRemote(_ output: Data, source: AgentSource, limit: Int = 40) -> [TranscriptEntry] {
         let found = output.split(separator: UInt8(ascii: "\n")).flatMap { line -> [TranscriptEntry] in
             guard let tab = line.firstIndex(of: UInt8(ascii: "\t")),
-                  let offset = Int(String(decoding: line[..<tab], as: UTF8.self)) else { return [] }
+                  let offset = Int(String(decoding: line[..<tab], as: UTF8.self)),
+                  (0..<Int.max / 64).contains(offset) else { return [] } // the host's output isn't trusted
             return entries(in: Data(line[line.index(after: tab)...]), source: source).enumerated().map { i, e in
                 TranscriptEntry(id: offset * 64 + i, kind: e.kind, text: e.text, date: e.date)
             }

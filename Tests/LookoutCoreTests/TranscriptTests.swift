@@ -38,6 +38,8 @@ struct TranscriptTests {
     @Test func remoteOutput() {
         let output = Data((#"120"# + "\t" + #"{"type":"user","message":{"role":"user","content":"deploy"}}"# + "\n"
             + "not a line\n"
+            + "\(Int.max)\t" + #"{"type":"user","message":{"role":"user","content":"overflow"}}"# + "\n"
+            + "-5\t" + #"{"type":"user","message":{"role":"user","content":"negative"}}"# + "\n"
             + #"300"# + "\t" + #"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Done."},{"type":"tool_use","name":"Bash","input":{"command":"ls"}}]}}"# + "\n").utf8)
         let entries = Transcript.parseRemote(output, source: .claude)
         #expect(entries.map(\.text) == ["deploy", "Done.", "Bash: ls"])
