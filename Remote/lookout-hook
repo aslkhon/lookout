@@ -158,7 +158,7 @@ def process_context(pid, env=None):
     ctx = {
         "agentPID": pid,
         "ancestors": ancestors(pid),
-        "tty": tty if tty.startswith("/dev/") else None,
+        "tty": tty if tty.startswith(("/dev/pts/", "/dev/tty")) else None,  # not /dev/null
         "term": env.get("TERM"),
         "termProgram": env.get("TERM_PROGRAM"),
         "startedAt": started_at(pid),
@@ -471,10 +471,139 @@ def uninstall():
     print(json.dumps(result))
 
 
+# MARK: Transcript mode
+
+def transcript_file(source, session_id, pid, cwd, started):
+    """The agent's transcript, found the same way Lookout does on the Mac (Transcript.swift)."""
+    if source == "claude":
+        return next(iter(glob.glob(os.path.join(HOME, ".claude", "projects", "*", session_id + ".jsonl"))), None)
+    rollouts = glob.glob(os.path.join(HOME, ".codex", "sessions", "**", "*.jsonl"), recursive=True)
+    if not session_id.startswith("pid:"):
+        return next((f for f in rollouts if session_id in os.path.basename(f)), None)
+    # No hook yet: the rollout Codex holds open, or else the newest one for the same folder.
+    if pid:
+        try:
+            for fd in os.listdir("/proc/%d/fd" % pid):
+                target = readlink("/proc/%d/fd/%s" % (pid, fd))
+                if "/.codex/sessions/" in target and target.endswith(".jsonl"):
+                    return target
+        except OSError:
+            pass
+    timed = []
+    for f in rollouts:
+        try:
+            timed.append((os.path.getmtime(f), f))
+        except OSError:
+            pass
+    for mtime, f in sorted(timed, reverse=True):
+        if mtime < started:
+            break
+        try:
+            with open(f, "rb") as handle:
+                meta = json.loads(handle.readline().decode("utf-8", "replace"))
+            if meta.get("payload", {}).get("cwd") == cwd:
+                return f
+        except (OSError, ValueError, AttributeError):
+            pass
+    return None
+
+
+def is_conversation(source, entry):
+    """Lines that can hold a prompt, a reply or a tool call, so tool output isn't sent over ssh."""
+    if source == "codex":
+        return entry.get("type") == "event_msg"
+    if entry.get("type") not in ("user", "assistant") or entry.get("isMeta") or entry.get("isSidechain"):
+        return False
+    content = (entry.get("message") or {}).get("content")
+    return isinstance(content, str) or any(
+        isinstance(b, dict) and b.get("type") in ("text", "tool_use") for b in content or [])
+
+
+SUMMARY_KEYS = ("command", "file_path", "path", "url", "pattern", "description")  # Transcript.toolSummary
+
+
+def slim(source, entry):
+    """Just what Lookout shows: no file contents, diffs or command output, and texts cut short."""
+    cut = lambda text: text[:4000] if isinstance(text, str) else text
+    keep = lambda d, keys: {k: d[k] for k in keys if k in d}
+    if source == "codex":
+        payload = dict(entry.get("payload") or {})
+        if isinstance(payload.get("message"), str):
+            payload["message"] = cut(payload["message"])
+        item = payload.get("item")
+        if isinstance(item, dict):
+            item = keep(item, ("type", "content", "parsed_cmd", "command", "changes"))
+            if isinstance(item.get("changes"), dict):
+                item["changes"] = {path: {} for path in item["changes"]}
+            if isinstance(item.get("content"), list):
+                item["content"] = [{"text": cut(c.get("text"))} for c in item["content"] if isinstance(c, dict)]
+            payload["item"] = item
+        return {"type": entry.get("type"), "timestamp": entry.get("timestamp"), "payload": payload}
+    message = entry.get("message") or {}
+    content = message.get("content")
+    if isinstance(content, str):
+        content = cut(content)
+    else:
+        blocks = []
+        for b in content or []:
+            if not isinstance(b, dict):
+                continue
+            if b.get("type") == "text":
+                blocks.append({"type": "text", "text": cut(b.get("text"))})
+            elif b.get("type") == "tool_use":
+                blocks.append({"type": "tool_use", "name": b.get("name"), "input": keep(b.get("input") or {}, SUMMARY_KEYS)})
+        content = blocks
+    return {"type": entry.get("type"), "timestamp": entry.get("timestamp"), "message": {"content": content}}
+
+
+def transcript(source, session_id, pid, cwd, started, limit=200):
+    """Prints the last `limit` conversation lines, slimmed, as "<byte offset>\\t<json>", oldest first.
+    Reads backwards a chunk at a time, up to 32 MB, skipping lines over 256 KB."""
+    path = transcript_file(source, session_id, pid, cwd, started)
+    if not path:
+        return
+    chunk, max_bytes, max_line = 1 << 20, 32 << 20, 256 << 10
+    found = []
+    with open(path, "rb") as f:
+        f.seek(0, os.SEEK_END)
+        offset, read, partial = f.tell(), 0, b""
+        while offset > 0 and read < max_bytes and len(found) < limit:
+            size = min(chunk, offset)
+            offset -= size
+            f.seek(offset)
+            data = f.read(size) + partial
+            read += size
+            parts = data.split(b"\n")
+            start = offset
+            if offset > 0:  # the first part began in an earlier chunk
+                partial = parts.pop(0)
+                start += len(partial) + 1
+            else:
+                partial = b""
+            positions = []
+            for part in parts:
+                positions.append((start, part))
+                start += len(part) + 1
+            for line_offset, part in reversed(positions):
+                if not part or len(part) > max_line:
+                    continue
+                try:
+                    entry = json.loads(part.decode("utf-8", "replace"))
+                except ValueError:
+                    continue
+                if isinstance(entry, dict) and is_conversation(source, entry):
+                    found.append((line_offset, slim(source, entry)))
+    for line_offset, entry in reversed(found[:limit]):
+        sys.stdout.write("%d\t%s\n" % (line_offset, json.dumps(entry)))
+
+
 def main():
     os.umask(0o077)  # everything Lookout writes on the server is owner-only
     arg = sys.argv[1] if len(sys.argv) > 1 else ""
-    if arg == "--watch":
+    if arg == "--transcript" and len(sys.argv) == 7:
+        source, session_id, pid, cwd, started = sys.argv[2:7]
+        transcript(source, session_id, int(pid or 0), cwd, float(started or 0))
+    elif arg == "--watch":
         try:
             watch()
         except (BrokenPipeError, KeyboardInterrupt):

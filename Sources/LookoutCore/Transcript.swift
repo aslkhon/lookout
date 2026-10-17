@@ -75,6 +75,18 @@ public enum Transcript {
         return Array(newestFirst.reversed().flatMap { $0 }.suffix(limit))
     }
 
+    /// The output of `lookout-hook --transcript` on an ssh host: "<byte offset>\t<json>" lines.
+    public static func parseRemote(_ output: Data, source: AgentSource, limit: Int = 40) -> [TranscriptEntry] {
+        let found = output.split(separator: UInt8(ascii: "\n")).flatMap { line -> [TranscriptEntry] in
+            guard let tab = line.firstIndex(of: UInt8(ascii: "\t")),
+                  let offset = Int(String(decoding: line[..<tab], as: UTF8.self)) else { return [] }
+            return entries(in: Data(line[line.index(after: tab)...]), source: source).enumerated().map { i, e in
+                TranscriptEntry(id: offset * 64 + i, kind: e.kind, text: e.text, date: e.date)
+            }
+        }
+        return Array(found.suffix(limit))
+    }
+
     public static func parse(_ lines: [Data], source: AgentSource) -> [TranscriptEntry] {
         lines.flatMap { entries(in: $0, source: source) }
             .enumerated().map { TranscriptEntry(id: $0.offset, kind: $0.element.kind, text: $0.element.text, date: $0.element.date) }

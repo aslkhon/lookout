@@ -32,6 +32,7 @@ struct DashboardView: View {
     /// Wide enough for project cards side by side; narrow enough for compact rows.
     private static let gridWidth: CGFloat = 940
     private static let compactWidth: CGFloat = 560
+    private static let toolbarSearchWidth: CGFloat = 600
     private var showsGrid: Bool { layout == .byProject && listWidth >= Self.gridWidth }
 
     private var all: [AgentSession] { model.sortedSessions }
@@ -246,13 +247,17 @@ struct DashboardView: View {
                 .help(collapsed.isEmpty ? "Collapse all projects" : "Expand all projects")
             }
         }
-        ToolbarItem {
-            // An AppKit search field: .searchable always lands at the window's trailing edge, over the inspector.
-            // Last, so it's the first to overflow, and narrower when space is tight.
-            SearchField(text: $query, prompt: "Search")
-                .frame(width: listWidth < 760 ? 120 : 180)
+        if searchInToolbar {
+            ToolbarItem {
+                // An AppKit search field: .searchable always lands at the window's trailing edge, over the inspector.
+                SearchField(text: $query, prompt: "Search")
+                    .frame(width: listWidth < 760 ? 120 : 180)
+            }
         }
     }
+
+    /// Too narrow and the toolbar would hide the search field: it moves above the list instead.
+    private var searchInToolbar: Bool { listWidth >= Self.toolbarSearchWidth }
 
     private var pinToggle: some View {
         Button(onTop ? "Don't Keep on Top" : "Keep on Top", systemImage: onTop ? "pin.fill" : "pin") { onTop.toggle() }
@@ -281,6 +286,12 @@ struct DashboardView: View {
     private var agentList: some View {
         Group {
             if showsGrid { projectGrid } else { list }
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if !searchInToolbar {
+                SearchField(text: $query, prompt: "Search")
+                    .padding(.horizontal, 12).padding(.vertical, 6)
+            }
         }
         .environment(\.compactRows, listWidth < Self.compactWidth)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { listWidth = $0 }
@@ -936,6 +947,8 @@ private struct ConversationView: View {
     /// nil until loaded; empty when there's no transcript to read.
     @State private var entries: [TranscriptEntry]?
     @State private var located: (id: String, url: URL?)?
+    /// Why an ssh host's history couldn't be read.
+    @State private var remoteError: String?
     @State private var showsAll = false
     @State private var expanded: Set<Int> = []
 
@@ -974,8 +987,9 @@ private struct ConversationView: View {
         let session = session
         if located?.id != session.id {
             entries = nil; showsAll = false; expanded = []
-            located = nil
+            located = nil; remoteError = nil
         }
+        if let host = session.host { return await reloadRemote(session, host: host) }
         if located?.url == nil { // a new Claude session has no file until its first prompt
             let url = await Task.detached { Transcript.url(for: session) }.value
             located = (session.id, url)
@@ -984,7 +998,30 @@ private struct ConversationView: View {
         entries = await Task.detached { Transcript.load(url, source: session.source, limit: 150) }.value
     }
 
-    /// No transcript: remote agents (for now), or a Codex agent that hasn't sent a hook yet.
+    /// Over ssh, through the helper Lookout installed on the host.
+    private func reloadRemote(_ session: AgentSession, host: String) async {
+        if entries != nil { // a working agent reports often: one ssh per burst of events
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+        }
+        located = (session.id, nil)
+        let quote = { (s: String) in "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'" }
+        let command = ["~/.lookout/bin/lookout-hook", "--transcript", quote(session.source.rawValue), quote(session.sessionID),
+                       String(session.agentPID ?? 0), quote(session.cwd),
+                       String(Int(session.startedAt?.timeIntervalSince1970 ?? 0))].joined(separator: " ")
+        do {
+            let output = try await RemoteHosts.run(host, command)
+            guard !Task.isCancelled else { return }
+            entries = Transcript.parseRemote(Data(output.utf8), source: session.source, limit: 150)
+            remoteError = nil
+        } catch {
+            guard !Task.isCancelled else { return }
+            if entries == nil { entries = [] }
+            remoteError = error.localizedDescription
+        }
+    }
+
+    /// No transcript: a Codex agent that hasn't sent a hook yet, or an ssh host that couldn't be read.
     @ViewBuilder
     private var fallback: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -995,8 +1032,8 @@ private struct ConversationView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
             }
-            Text(session.host != nil ? "History for agents on ssh hosts isn't available yet."
-                                     : "No history found yet. It appears after the agent's next turn.")
+            Text(remoteError.map { "Couldn't read the history on \(session.host ?? "the host"): \($0)" }
+                 ?? "No history found yet. It appears after the agent's next turn.")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }

@@ -35,6 +35,16 @@ struct TranscriptTests {
         #expect(entries.map(\.text) == ["is prod up?", "Bash: curl x", "Edit: a.py, b.py", "Yes.", "old prompt"])
     }
 
+    @Test func remoteOutput() {
+        let output = Data((#"120"# + "\t" + #"{"type":"user","message":{"role":"user","content":"deploy"}}"# + "\n"
+            + "not a line\n"
+            + #"300"# + "\t" + #"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Done."},{"type":"tool_use","name":"Bash","input":{"command":"ls"}}]}}"# + "\n").utf8)
+        let entries = Transcript.parseRemote(output, source: .claude)
+        #expect(entries.map(\.text) == ["deploy", "Done.", "Bash: ls"])
+        #expect(entries.map(\.id) == [120 * 64, 300 * 64, 300 * 64 + 1])
+        #expect(Transcript.parseRemote(output, source: .claude, limit: 1).map(\.text) == ["Bash: ls"])
+    }
+
     @Test func loadReadsOnlyTheTail() throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("transcript-\(UUID()).jsonl")
         defer { try? FileManager.default.removeItem(at: url) }
