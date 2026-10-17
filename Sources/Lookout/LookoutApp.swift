@@ -19,7 +19,10 @@ struct LookoutApp: App {
         Window("Lookout", id: "dashboard") {
             DashboardView(model: model, remotes: model.remotes, openSetup: { delegate.showSetup() })
                 .frame(minWidth: 380, minHeight: 300) // narrow enough to pin in a corner
-                .onAppear { NSApp.setActivationPolicy(.regular) } // in the Dock and ⌘-Tab while open
+                .onAppear {
+                    NSApp.setActivationPolicy(.regular) // in the Dock and ⌘-Tab while open
+                    AppDelegate.shared?.closeMini() // one or the other, never both
+                }
                 .onDisappear { NSApp.setActivationPolicy(.accessory) }
         }
         .defaultSize(width: 980, height: 600)
@@ -29,10 +32,14 @@ struct LookoutApp: App {
 private struct MenuBarLabel: View {
     let count: Int
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismissWindow) private var dismissWindow
 
     var body: some View {
         Image(systemName: count > 0 ? "binoculars.fill" : "binoculars")
-            .onAppear { AppDelegate.openDashboard = { openWindow(id: "dashboard") } }
+            .onAppear {
+                AppDelegate.openDashboard = { openWindow(id: "dashboard") }
+                AppDelegate.closeDashboard = { dismissWindow(id: "dashboard") }
+            }
         if count > 0 { Text("\(count)") }
     }
 }
@@ -45,6 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private(set) static weak var shared: AppDelegate?
     /// SwiftUI's openWindow for the dashboard, captured from the menu bar label.
     static var openDashboard: (() -> Void)?
+    static var closeDashboard: (() -> Void)?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Self.shared = self

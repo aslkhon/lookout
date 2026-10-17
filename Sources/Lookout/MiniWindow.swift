@@ -144,7 +144,9 @@ extension AppDelegate {
         if miniPanel?.isVisible == true { closeMini() } else { showMini() }
     }
 
+    /// Replaces the dashboard: the two are never open at once.
     func showMini() {
+        Self.closeDashboard?()
         if miniPanel == nil {
             // Non-activating: clicking a tile never pulls Lookout in front of the app you're working in.
             let panel = MiniPanel(contentRect: NSRect(x: 0, y: 0, width: 200, height: 80),

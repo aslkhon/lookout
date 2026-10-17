@@ -19,7 +19,6 @@ struct DashboardView: View {
         UserDefaults.standard.object(forKey: "dashboardShowsSidebar") as? Bool == false ? .detailOnly : .all
     @AppStorage("dashboardShowsDetail") private var showsDetail = true
     @AppStorage("dashboardOnTop") private var onTop = false
-    @AppStorage(AppDelegate.miniKey) private var miniShown = false
     @State private var status: AgentStatus.Group?
     @State private var hostFilter: HostFilter = .all
     @State private var source: AgentSource?
@@ -278,11 +277,9 @@ struct DashboardView: View {
     }
 
     private var miniToggle: some View {
-        Button(miniShown ? "Close Mini Window" : "Mini Window", systemImage: miniShown ? "pip.fill" : "pip") {
-            AppDelegate.shared?.toggleMini()
-        }
-        .keyboardShortcut("m", modifiers: [.option, .command])
-        .help(miniShown ? "Close the floating mini window" : "Show projects in a small window that floats above other apps")
+        Button("Compact Mode", systemImage: "pip") { AppDelegate.shared?.showMini() }
+            .keyboardShortcut("m", modifiers: [.shift, .command]) // ⌥⌘M is Minimize All
+            .help("Switch to a small window of your projects that floats above other apps")
     }
 
     private var inspectorToggle: some View {
@@ -445,14 +442,21 @@ struct DashboardView: View {
         }
     }
 
-    /// Wide windows: project cards two to a row, like a control panel.
+    /// Wide windows: project cards two to a row, like a control panel. Cards in a row share its height.
     private var projectGrid: some View {
         let ended = endedByProject
-        let column = GridItem(.flexible(), spacing: 12, alignment: .top)
+        let projects = projects
         return ScrollView {
-            LazyVGrid(columns: [column, column], alignment: .leading, spacing: 12) {
-                ForEach(projects, id: \.name) { project in
-                    projectTile(project, endedHidden: ended[project.name] ?? 0)
+            Grid(horizontalSpacing: 12, verticalSpacing: 12) {
+                ForEach(Array(stride(from: 0, to: projects.count, by: 2)), id: \.self) { i in
+                    GridRow(alignment: .top) {
+                        ForEach(projects[i..<min(i + 2, projects.count)], id: \.name) { project in
+                            projectTile(project, endedHidden: ended[project.name] ?? 0)
+                        }
+                        if i + 1 == projects.count {
+                            Color.clear.frame(maxWidth: .infinity).gridCellUnsizedAxes(.vertical)
+                        }
+                    }
                 }
             }
             .padding(16)
@@ -472,6 +476,7 @@ struct DashboardView: View {
             }
         }
         .padding(4)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top) // as tall as its row
         .background { CardPiece(project: project.name, top: true, bottom: true, alert: alert, inList: false) }
     }
 
