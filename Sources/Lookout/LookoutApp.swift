@@ -40,10 +40,14 @@ private struct MenuBarLabel: View {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var setupWindow: NSWindow?
+    var miniPanel: NSPanel?
+    /// For views outside the App struct (the dashboard's toolbar, the menu).
+    private(set) static weak var shared: AppDelegate?
     /// SwiftUI's openWindow for the dashboard, captured from the menu bar label.
     static var openDashboard: (() -> Void)?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        Self.shared = self
         _ = Notifier.shared // become the notification delegate before any click arrives
         AppModel.shared.start()
         if AppModel.shared.needsSetup {
@@ -52,6 +56,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Hooks already present (reinstall, new bundle id): make sure notifications are authorized.
             Task { await Notifier.shared.requestAuthorization() }
         }
+        if UserDefaults.standard.bool(forKey: Self.miniKey) { showMini() }
     }
 
     func showSetup() {

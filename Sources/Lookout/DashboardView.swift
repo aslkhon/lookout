@@ -19,6 +19,7 @@ struct DashboardView: View {
         UserDefaults.standard.object(forKey: "dashboardShowsSidebar") as? Bool == false ? .detailOnly : .all
     @AppStorage("dashboardShowsDetail") private var showsDetail = true
     @AppStorage("dashboardOnTop") private var onTop = false
+    @AppStorage(AppDelegate.miniKey) private var miniShown = false
     @State private var status: AgentStatus.Group?
     @State private var hostFilter: HostFilter = .all
     @State private var source: AgentSource?
@@ -98,7 +99,7 @@ struct DashboardView: View {
         }
         .sheet(isPresented: Binding(get: { editingIcon != nil }, set: { if !$0 { editingIcon = nil } })) {
             if let project = editingIcon {
-                ProjectIconPicker(project: project) { editingIcon = nil }
+                ProjectStylePicker(project: project) { editingIcon = nil }
             }
         }
         .navigationTitle("Lookout")
@@ -244,6 +245,7 @@ struct DashboardView: View {
             .help("Group agents by status or by project")
         }
         ToolbarItem { pinToggle }
+        ToolbarItem { miniToggle }
         ToolbarItem {
             if layout == .byStatus {
                 Button("Clear Ended", systemImage: "clear") { model.clearEnded() }
@@ -273,6 +275,14 @@ struct DashboardView: View {
         Button(onTop ? "Don't Keep on Top" : "Keep on Top", systemImage: onTop ? "pin.fill" : "pin") { onTop.toggle() }
             .keyboardShortcut("t", modifiers: [.option, .command])
             .help(onTop ? "Stop keeping this window above other apps" : "Keep this window above other apps")
+    }
+
+    private var miniToggle: some View {
+        Button(miniShown ? "Close Mini Window" : "Mini Window", systemImage: miniShown ? "pip.fill" : "pip") {
+            AppDelegate.shared?.toggleMini()
+        }
+        .keyboardShortcut("m", modifiers: [.option, .command])
+        .help(miniShown ? "Close the floating mini window" : "Show projects in a small window that floats above other apps")
     }
 
     private var inspectorToggle: some View {
@@ -424,12 +434,12 @@ struct DashboardView: View {
                 projectHeader(project, endedHidden: ended[project.name] ?? 0)
                     .selectionDisabled()
                     .listRowSeparator(.hidden)
-                    .listRowBackground(CardPiece(top: true, bottom: rows.isEmpty, alert: alert))
+                    .listRowBackground(CardPiece(project: project.name, top: true, bottom: rows.isEmpty, alert: alert))
                 ForEach(rows) { session in
                     let last = session.id == rows.last?.id
                     ProjectRow(session: session)
                         .listRowSeparator(last ? .hidden : .visible)
-                        .listRowBackground(CardPiece(top: false, bottom: last, alert: alert))
+                        .listRowBackground(CardPiece(project: project.name, top: false, bottom: last, alert: alert))
                 }
             }
         }
@@ -462,10 +472,7 @@ struct DashboardView: View {
             }
         }
         .padding(4)
-        .background(alert ? Color.orange.opacity(0.1) : Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 10))
-        .overlay {
-            if alert { RoundedRectangle(cornerRadius: 10).strokeBorder(.orange.opacity(0.6)) }
-        }
+        .background { CardPiece(project: project.name, top: true, bottom: true, alert: alert, inList: false) }
     }
 
     /// A grid row: click selects, double-click focuses the terminal, right-click for the menu.
@@ -701,12 +708,6 @@ private struct ProjectHeader: View {
     let sessions: [AgentSession]
     let endedHidden: Int
     let pickIcon: () -> Void
-    @AppStorage private var icon: String
-
-    init(name: String, sessions: [AgentSession], endedHidden: Int, pickIcon: @escaping () -> Void) {
-        self.name = name; self.sessions = sessions; self.endedHidden = endedHidden; self.pickIcon = pickIcon
-        _icon = ProjectIconPicker.storage(for: name)
-    }
 
     var body: some View {
         let hosts = Array(Set(sessions.map { $0.host ?? "" })).sorted()
@@ -714,19 +715,21 @@ private struct ProjectHeader: View {
         let counts = Dictionary(grouping: sessions, by: \.status.group).mapValues(\.count)
         HStack(spacing: 8) {
             Button(action: pickIcon) {
-                Group {
-                    if icon.isEmpty {
-                        Image(systemName: "folder").foregroundStyle(.secondary)
-                    } else {
-                        Text(icon)
-                    }
-                }
-                .font(.body)
-                .frame(width: 20)
+                ProjectIcon(project: name)
+                    .font(.body)
+                    .frame(width: 20)
             }
             .buttonStyle(.plain)
-            .help("Set Icon")
+            .help("Set Icon and Color")
             Text(name).font(.body.weight(.semibold)).foregroundStyle(.primary).fixedSize()
+            if counts[.needsYou] != nil {
+                Text("Needs you")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(.orange, in: Capsule())
+                    .fixedSize()
+            }
             ForEach(hosts, id: \.self) { HostChip(host: $0.isEmpty ? nil : $0).fixedSize() }
             if cwds.count == 1, let cwd = cwds.first {
                 Text((cwd as NSString).abbreviatingWithTildeInPath)
@@ -752,67 +755,34 @@ private struct ProjectHeader: View {
     }
 }
 
-/// A slice of a project card: rounded at the top for the header, at the bottom for the last row.
+/// A project card's background, or a slice of it in the list: rounded at the top for the header and at the
+/// bottom for the last row. Middle slices draw only the sides of the border, so the card reads as one piece.
 private struct CardPiece: View {
     let top: Bool
     let bottom: Bool
-    /// An agent in the project needs you: tint the card orange.
-    var alert = false
+    /// An agent in the project needs you: the card glows orange.
+    let alert: Bool
+    /// A list row background, inset from the row's edges; otherwise a whole grid tile.
+    let inList: Bool
+    @AppStorage private var color: String
+
+    init(project: String, top: Bool, bottom: Bool, alert: Bool, inList: Bool = true) {
+        self.top = top; self.bottom = bottom; self.alert = alert; self.inList = inList
+        _color = ProjectStyle.color(for: project)
+    }
 
     var body: some View {
-        UnevenRoundedRectangle(topLeadingRadius: top ? 10 : 0, bottomLeadingRadius: bottom ? 10 : 0,
-                               bottomTrailingRadius: bottom ? 10 : 0, topTrailingRadius: top ? 10 : 0)
-            .fill(alert ? AnyShapeStyle(.orange.opacity(0.1)) : AnyShapeStyle(.primary.opacity(0.05)))
-            .padding(.top, top ? 4 : 0).padding(.bottom, bottom ? 4 : 0)
-            .padding(.horizontal, 8)
-    }
-}
-
-/// Emoji for a project, saved per project name.
-private struct ProjectIconPicker: View {
-    let project: String
-    let done: () -> Void
-    @AppStorage private var icon: String
-    @FocusState private var fieldFocused: Bool
-
-    static func storage(for project: String) -> AppStorage<String> {
-        AppStorage(wrappedValue: "", "projectIcon.\(project)")
-    }
-
-    init(project: String, done: @escaping () -> Void) {
-        self.project = project; self.done = done
-        _icon = Self.storage(for: project)
-    }
-
-    private static let suggestions = ["🚀", "🧠", "📞", "💬", "🛒", "💳", "📊", "📈", "🔭", "🛠️", "🧪", "🤖",
-                                      "🌐", "📱", "🖥️", "🗄️", "🔒", "📦", "🎨", "📝", "🎧", "🎬", "🏦", "⚡️"]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Icon for \(project)").font(.headline)
-            LazyVGrid(columns: Array(repeating: GridItem(.fixed(28), spacing: 4), count: 8), spacing: 4) {
-                ForEach(Self.suggestions, id: \.self) { emoji in
-                    Button { icon = emoji; done() } label: {
-                        Text(emoji).font(.title3).frame(width: 28, height: 28)
-                            .background(icon == emoji ? Color.accentColor.opacity(0.25) : .clear,
-                                        in: RoundedRectangle(cornerRadius: 6))
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            HStack {
-                TextField("Any emoji", text: Binding(get: { icon }, set: { icon = $0.last.map(String.init) ?? "" }))
-                    .focused($fieldFocused)
-                    .frame(width: 90)
-                    .onSubmit(done)
-                Button("Emoji…") { fieldFocused = true; NSApp.orderFrontCharacterPalette(nil) }
-                Spacer()
-                Button("Remove") { icon = ""; done() }.disabled(icon.isEmpty)
-                Button("Done", action: done).keyboardShortcut(.defaultAction)
-            }
+        let shape = UnevenRoundedRectangle(topLeadingRadius: top ? 10 : 0, bottomLeadingRadius: bottom ? 10 : 0,
+                                           bottomTrailingRadius: bottom ? 10 : 0, topTrailingRadius: top ? 10 : 0)
+        ZStack {
+            shape.fill(.primary.opacity(0.05))
+            // Open ends run past the row and are clipped off.
+            CardOutline(shape: shape, color: ProjectStyle.color(named: color), alert: alert)
+                .padding(.top, top ? 0 : -20).padding(.bottom, bottom ? 0 : -20)
         }
-        .padding(16)
-        .frame(width: 330)
+        .padding(.top, inList && top ? 4 : 0).padding(.bottom, inList && bottom ? 4 : 0)
+        .padding(.horizontal, inList ? 8 : 0)
+        .mask { Rectangle().padding(inList ? 0 : -12) } // tiles keep their glow
     }
 }
 

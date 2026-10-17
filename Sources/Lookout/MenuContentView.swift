@@ -8,6 +8,7 @@ struct MenuContentView: View {
     @ObservedObject var model: AppModel
     var openSetup: () -> Void
     @Environment(\.openWindow) private var openWindow
+    @AppStorage(AppDelegate.miniKey) private var miniShown = false
 
     @State private var listHeight: CGFloat = 0
     @State private var searching = false
@@ -179,6 +180,8 @@ struct MenuContentView: View {
                 .keyboardShortcut("o")
             footerButton("Setup…", shortcut: "⌘,") { closeMenu(); openSetup() }
                 .keyboardShortcut(",")
+            Button(miniShown ? "Hide Mini" : "Mini") { closeMenu(); AppDelegate.shared?.toggleMini() }
+                .help("A small window with your projects that floats above other apps")
             Spacer()
             Button("Quit") { NSApp.terminate(nil) }
                 .keyboardShortcut("q")
