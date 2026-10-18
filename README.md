@@ -48,7 +48,7 @@ To remove the hooks, open **Setup… → Remove Hooks**.
 
 Clicking an agent jumps to its terminal. **Open Window** in the menu opens a dashboard, which
 filters agents by status or project and shows details for the selected one. Projects can have
-their own icon and border color.
+their own icon and background color.
 
 ![The dashboard, by status](docs/images/by-status.png)
 

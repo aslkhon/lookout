@@ -100,9 +100,9 @@ private struct MiniCard: View {
         }
         .padding(3)
         .frame(width: 203)
-        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+        .background(ProjectStyle.cardFill(named: color), in: RoundedRectangle(cornerRadius: 8))
         .overlay {
-            CardOutline(shape: RoundedRectangle(cornerRadius: 8), color: ProjectStyle.color(named: color), alert: alert)
+            CardOutline(shape: RoundedRectangle(cornerRadius: 8), alert: alert)
         }
     }
 }

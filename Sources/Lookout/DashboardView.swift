@@ -782,9 +782,9 @@ private struct CardPiece: View {
         let shape = UnevenRoundedRectangle(topLeadingRadius: top ? 10 : 0, bottomLeadingRadius: bottom ? 10 : 0,
                                            bottomTrailingRadius: bottom ? 10 : 0, topTrailingRadius: top ? 10 : 0)
         ZStack {
-            shape.fill(.primary.opacity(0.05))
+            shape.fill(ProjectStyle.cardFill(named: color))
             // Open ends run past the row and are clipped off.
-            CardOutline(shape: shape, color: ProjectStyle.color(named: color), alert: alert)
+            CardOutline(shape: shape, alert: alert)
                 .padding(.top, top ? 0 : -20).padding(.bottom, bottom ? 0 : -20)
         }
         .padding(.top, inList && top ? 4 : 0).padding(.bottom, inList && bottom ? 4 : 0)

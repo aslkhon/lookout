@@ -19,6 +19,11 @@ enum ProjectStyle {
     static func color(named name: String) -> Color? {
         colors.first { $0.name == name }?.color
     }
+
+    /// A card's background: a pale wash of the project's color, or the plain card gray.
+    static func cardFill(named name: String) -> Color {
+        color(named: name)?.opacity(0.08) ?? .primary.opacity(0.05)
+    }
 }
 
 /// The project's emoji, or a folder in its color.
@@ -40,28 +45,22 @@ struct ProjectIcon: View {
     }
 }
 
-/// A project card's border: its color, plus an orange glow that pulses while an agent needs you.
-/// The pulse follows the clock, so every piece of a card (and every card) glows in step.
+/// A project card's outline while an agent needs you: an orange glow that pulses
+/// in step on every piece of a card (and every card).
 struct CardOutline<S: InsettableShape>: View {
     let shape: S
-    let color: Color?
     let alert: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        ZStack {
-            if let color { shape.strokeBorder(color.opacity(0.85), lineWidth: 1.5) }
-            if alert {
-                // Just outside the card's own border, so its color still shows.
-                Pulsing(pulsing: !reduceMotion, margin: 12) {
-                    shape.strokeBorder(Color.orange, lineWidth: 2)
-                        .padding(color == nil ? 0 : -2.5)
-                        .shadow(color: .orange, radius: 6)
-                }
-                .padding(-12)
+        if alert {
+            Pulsing(pulsing: !reduceMotion, margin: 12) {
+                shape.strokeBorder(Color.orange, lineWidth: 2)
+                    .shadow(color: .orange, radius: 6)
             }
+            .padding(-12)
+            .allowsHitTesting(false)
         }
-        .allowsHitTesting(false)
     }
 }
 
