@@ -19,6 +19,9 @@ struct SetupView: View {
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var confirmRemoveAll = false
     @AppStorage(Notifier.soundKey) private var sound = "Default"
+    @AppStorage(Notifier.quietKey) private var quietHours = false
+    @AppStorage(Notifier.quietStartKey) private var quietStart = Notifier.defaultQuietStart
+    @AppStorage(Notifier.quietEndKey) private var quietEnd = Notifier.defaultQuietEnd
     /// Bumped after file changes so installed states are re-read.
     @State private var revision = 0
 
@@ -141,12 +144,37 @@ struct SetupView: View {
             .onChange(of: sound) { _, name in NSSound(named: name)?.play() } // preview
         }
         Divider()
+        SetupRow(state: nil, title: "Quiet hours",
+                 subtitle: "No notifications in these hours; the menu bar still shows who needs you. Mute a single project from its right-click menu.") {
+            HStack(spacing: 6) {
+                Toggle("", isOn: $quietHours).toggleStyle(.checkbox).labelsHidden()
+                Group {
+                    DatePicker("From", selection: time($quietStart), displayedComponents: .hourAndMinute)
+                    Text("to")
+                    DatePicker("To", selection: time($quietEnd), displayedComponents: .hourAndMinute)
+                }
+                .labelsHidden()
+                .fixedSize()
+                .disabled(!quietHours)
+            }
+        }
+        Divider()
         SetupRow(state: nil, title: "Launch at login",
                  subtitle: "Agents started before Lookout are still found, so this is just convenience.",
                  message: messages["login"]) {
             Toggle("", isOn: Binding(get: { launchAtLogin }, set: setLaunchAtLogin))
                 .toggleStyle(.checkbox)
                 .labelsHidden()
+        }
+    }
+
+    /// Minutes after midnight as a time of day, for a time picker.
+    private func time(_ minutes: Binding<Int>) -> Binding<Date> {
+        Binding {
+            Calendar.current.date(bySettingHour: minutes.wrappedValue / 60, minute: minutes.wrappedValue % 60, second: 0, of: .now) ?? .now
+        } set: { date in
+            let parts = Calendar.current.dateComponents([.hour, .minute], from: date)
+            minutes.wrappedValue = (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
         }
     }
 

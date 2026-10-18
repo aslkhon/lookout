@@ -355,6 +355,8 @@ struct DashboardView: View {
         Button("Focus Terminal") { model.focus(session) }
         Button("Copy Directory") { copy(session.cwd) }
         Button("Copy Session ID") { copy(session.sessionID) }
+        Divider()
+        MuteToggle(project: session.projectName)
     }
 
     /// ⌘1–⌘6 pick a status filter; Return focuses the selected agent (the list handles Return itself).
@@ -429,6 +431,7 @@ struct DashboardView: View {
         }
         .buttonStyle(.plain)
         .focusable(false) // its focus ring drew over the card's edge
+        .contextMenu { MuteToggle(project: project.name) }
     }
 
     /// Each project is one card: its header and agents share a rounded background.
@@ -762,6 +765,7 @@ private struct ProjectHeader: View {
             .buttonStyle(.plain)
             .help("Set Icon and Color")
             Text(name).font(.body.weight(.semibold)).foregroundStyle(.primary).fixedSize()
+            MutedBell(project: name)
             if counts[.needsYou] != nil {
                 Text("Needs you")
                     .font(.caption2.weight(.semibold))

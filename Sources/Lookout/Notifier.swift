@@ -14,6 +14,13 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     /// UserDefaults key for the sound picked in Setup: "Default", "None" or a macOS sound name.
     static let soundKey = "notificationSound"
 
+    /// Quiet hours from Setup: on or off, and the window in minutes after midnight.
+    static let quietKey = "quietHours"
+    static let quietStartKey = "quietHoursStart"
+    static let quietEndKey = "quietHoursEnd"
+    static let defaultQuietStart = 22 * 60
+    static let defaultQuietEnd = 8 * 60
+
     /// The sounds in /System/Library/Sounds, e.g. "Glass" and "Ping".
     static let systemSounds: [String] = ((try? FileManager.default.contentsOfDirectory(atPath: "/System/Library/Sounds")) ?? [])
         .map { ($0 as NSString).deletingPathExtension }
@@ -37,7 +44,18 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
     }
 
+    /// Quiet hours, or a muted project. The menu bar and windows still show who needs you.
+    private func silenced(_ session: AgentSession) -> Bool {
+        let defaults = UserDefaults.standard
+        if defaults.bool(forKey: ProjectStyle.mutedKey(session.projectName)) { return true }
+        guard defaults.bool(forKey: Self.quietKey) else { return false }
+        let quiet = QuietHours(start: defaults.object(forKey: Self.quietStartKey) as? Int ?? Self.defaultQuietStart,
+                               end: defaults.object(forKey: Self.quietEndKey) as? Int ?? Self.defaultQuietEnd)
+        return quiet.contains(Date())
+    }
+
     func post(for session: AgentSession) {
+        guard !silenced(session) else { return }
         let content = UNMutableNotificationContent()
         switch session.status {
         case .needsApproval:

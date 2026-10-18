@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// What the user picked for a project, saved per project name: an emoji and a card color.
+/// What the user picked for a project, saved per project name: an emoji, a card color and whether it notifies.
 enum ProjectStyle {
     static func icon(for project: String) -> AppStorage<String> {
         AppStorage(wrappedValue: "", "projectIcon.\(project)")
@@ -9,6 +9,12 @@ enum ProjectStyle {
 
     static func color(for project: String) -> AppStorage<String> {
         AppStorage(wrappedValue: "", "projectColor.\(project)")
+    }
+
+    static func mutedKey(_ project: String) -> String { "projectMuted.\(project)" }
+
+    static func muted(for project: String) -> AppStorage<Bool> {
+        AppStorage(wrappedValue: false, mutedKey(project))
     }
 
     static let colors: [(name: String, color: Color)] = [
@@ -23,6 +29,28 @@ enum ProjectStyle {
     /// A card's background: a pale wash of the project's color, or the plain card gray.
     static func cardFill(named name: String) -> Color {
         color(named: name)?.opacity(0.08) ?? .primary.opacity(0.05)
+    }
+}
+
+/// "Mute Notifications", for a project's context menu.
+struct MuteToggle: View {
+    @AppStorage private var muted: Bool
+
+    init(project: String) { _muted = ProjectStyle.muted(for: project) }
+
+    var body: some View { Toggle("Mute Notifications", isOn: $muted) }
+}
+
+/// A slashed bell after a muted project's name.
+struct MutedBell: View {
+    @AppStorage private var muted: Bool
+
+    init(project: String) { _muted = ProjectStyle.muted(for: project) }
+
+    var body: some View {
+        if muted {
+            Image(systemName: "bell.slash").foregroundStyle(.secondary).help("Notifications muted")
+        }
     }
 }
 

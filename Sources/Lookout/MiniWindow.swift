@@ -80,6 +80,7 @@ private struct MiniCard: View {
             HStack(spacing: 5) {
                 ProjectIcon(project: name).font(.system(size: 12.5)).frame(width: 17)
                 Text(name).font(.system(size: 12.5, weight: .semibold)).lineLimit(1)
+                MutedBell(project: name).font(.system(size: 11))
                 if alert {
                     Text("Needs you")
                         .font(.system(size: 11, weight: .semibold)).foregroundStyle(.white)
@@ -93,6 +94,7 @@ private struct MiniCard: View {
             .contentShape(Rectangle())
             .onTapGesture(perform: openDashboard)
             .help("Show \(name) in the full window")
+            .contextMenu { MuteToggle(project: name) }
             ForEach(sessions) { session in
                 Divider().padding(.leading, 6)
                 MiniRow(session: session)
