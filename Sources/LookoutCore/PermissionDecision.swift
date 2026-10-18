@@ -6,6 +6,8 @@ public enum PermissionDecision: Sendable, Equatable {
     case allow, deny
     /// Answers by question text: an option's label (labels joined by ", " for several), or the user's own words.
     case answer([String: String])
+    /// A deny that tells the agent what to change; for a plan, "Tell Claude what to change".
+    case feedback(String)
 
     public var isAnswer: Bool {
         if case .answer = self { true } else { false }
@@ -16,6 +18,7 @@ public enum PermissionDecision: Sendable, Equatable {
         switch self {
         case .allow: "allow"
         case .deny: "deny"
+        case .feedback(let text): "feedback\n" + text
         case .answer(let answers):
             "answer\n" + String(decoding: (try? JSONSerialization.data(withJSONObject: answers, options: .sortedKeys)) ?? Data("{}".utf8), as: UTF8.self)
         }
@@ -26,6 +29,10 @@ public enum PermissionDecision: Sendable, Equatable {
         switch head {
         case "allow": self = .allow
         case "deny": self = .deny
+        case "feedback":
+            let text = rest.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { return nil }
+            self = .feedback(text)
         case "answer":
             guard let answers = try? JSONSerialization.jsonObject(with: Data(rest.utf8)) as? [String: String] else { return nil }
             self = .answer(answers)
@@ -45,6 +52,7 @@ public enum PermissionDecision: Sendable, Equatable {
         switch self {
         case .allow: decision = ["behavior": "allow"]
         case .deny: decision = ["behavior": "deny", "message": "Denied from Lookout"]
+        case .feedback(let text): decision = ["behavior": "deny", "message": text]
         case .answer(let answers):
             var input = toolInput
             input["answers"] = answers
@@ -52,6 +60,19 @@ public enum PermissionDecision: Sendable, Equatable {
         }
         let output = ["hookSpecificOutput": ["hookEventName": "PermissionRequest", "decision": decision]]
         return (try? JSONSerialization.data(withJSONObject: output, options: .sortedKeys)) ?? Data()
+    }
+}
+
+/// Claude's plan, when it asks to leave plan mode. A hook can't approve one (Claude ignores the allow), only
+/// send feedback; approving happens in the terminal.
+public enum PlanReview {
+    public static let tool = "ExitPlanMode"
+    /// Plans are kept whole by the hooks up to this size.
+    public static let maxLength = 64 << 10
+
+    public static func plan(_ toolInput: [String: JSONValue]?, tool: String?) -> String? {
+        guard tool == Self.tool, case .string(let plan)? = toolInput?["plan"], !plan.isEmpty else { return nil }
+        return plan
     }
 }
 

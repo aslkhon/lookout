@@ -8,6 +8,10 @@ import SwiftUI
 struct SetupView: View {
     static let size = CGSize(width: 640, height: 780)
 
+    enum Tab: String, CaseIterable {
+        case agents = "Agents", hosts = "Remote Hosts", notifications = "Notifications", general = "General"
+    }
+
     @ObservedObject var model: AppModel
     @ObservedObject var remotes: RemoteHosts
     var close: () -> Void
@@ -18,10 +22,13 @@ struct SetupView: View {
     @State private var notificationsAllowed: Bool?
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var confirmRemoveAll = false
+    @State private var tab = Tab.agents
     @AppStorage(Notifier.soundKey) private var sound = "Default"
     @AppStorage(Notifier.quietKey) private var quietHours = false
     @AppStorage(Notifier.quietStartKey) private var quietStart = Notifier.defaultQuietStart
     @AppStorage(Notifier.quietEndKey) private var quietEnd = Notifier.defaultQuietEnd
+    @AppStorage(KeepAwake.key) private var keepAwake = false
+    @AppStorage(GlobalShortcut.key) private var globalShortcut = true
     /// Bumped after file changes so installed states are re-read.
     @State private var revision = 0
 
@@ -36,16 +43,29 @@ struct SetupView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 16) {
+                header
+                Picker("", selection: $tab) {
+                    ForEach(Tab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+                .frame(maxWidth: .infinity)
+            }
+            .padding([.horizontal, .top], 20).padding(.bottom, 14)
+            Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    header
-                    VStack(alignment: .leading, spacing: 8) {
-                        SectionTitle(title: "This Mac")
-                        card { thisMacRows }
+                    switch tab {
+                    case .agents: card { agentRows }
+                    case .hosts: RemoteHostsSection(model: model, remotes: remotes)
+                    case .notifications: card { notificationRows }
+                    case .general: card { generalRows }
                     }
-                    RemoteHostsSection(model: model, remotes: remotes)
                 }
                 .padding(20)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             Divider()
             footer
@@ -104,10 +124,10 @@ struct SetupView: View {
         .padding(.horizontal, 20).padding(.vertical, 14)
     }
 
-    // MARK: This Mac
+    // MARK: Tabs
 
     @ViewBuilder
-    private var thisMacRows: some View {
+    private var agentRows: some View {
         let _ = revision
         hookRow(.claude)
         Divider()
@@ -116,7 +136,10 @@ struct SetupView: View {
             Divider()
             editorRow(editor)
         }
-        Divider()
+    }
+
+    @ViewBuilder
+    private var notificationRows: some View {
         SetupRow(state: notificationsAllowed == true ? .ok : notificationsAllowed == false ? .warning : .unknown,
                  title: "Notifications",
                  subtitle: notificationsAllowed == false
@@ -147,7 +170,7 @@ struct SetupView: View {
         SetupRow(state: nil, title: "Quiet hours",
                  subtitle: "No notifications in these hours; the menu bar still shows who needs you. Mute a single project from its right-click menu.") {
             HStack(spacing: 6) {
-                Toggle("", isOn: $quietHours).toggleStyle(.checkbox).labelsHidden()
+                Toggle("", isOn: $quietHours).toggleStyle(.switch).controlSize(.small).labelsHidden()
                 Group {
                     DatePicker("From", selection: time($quietStart), displayedComponents: .hourAndMinute)
                     Text("to")
@@ -158,12 +181,26 @@ struct SetupView: View {
                 .disabled(!quietHours)
             }
         }
+    }
+
+    @ViewBuilder
+    private var generalRows: some View {
+        SetupRow(state: nil, title: "Keep awake while agents work",
+                 subtitle: "The Mac doesn't idle-sleep during a turn. The display still sleeps.") {
+            Toggle("", isOn: $keepAwake).toggleStyle(.switch).controlSize(.small).labelsHidden()
+        }
+        Divider()
+        SetupRow(state: nil, title: "Open Lookout with \(GlobalShortcut.display)",
+                 subtitle: "From any app. In the panel, ⌘Y and ⌘N answer the first request, ⌘1–⌘9 pick an option.") {
+            Toggle("", isOn: $globalShortcut).toggleStyle(.switch).controlSize(.small).labelsHidden()
+                .onChange(of: globalShortcut) { GlobalShortcut.shared.update() }
+        }
         Divider()
         SetupRow(state: nil, title: "Launch at login",
                  subtitle: "Agents started before Lookout are still found, so this is just convenience.",
                  message: messages["login"]) {
             Toggle("", isOn: Binding(get: { launchAtLogin }, set: setLaunchAtLogin))
-                .toggleStyle(.checkbox)
+                .toggleStyle(.switch).controlSize(.small)
                 .labelsHidden()
         }
     }

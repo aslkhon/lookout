@@ -329,7 +329,8 @@ extension AgentSession {
 
     /// "Needs approval · Bash: npm test"-style text after the status label.
     var statusDetail: String? {
-        if status == .needsApproval, let tool { return tool.name } // a question shows itself instead
+        // A question or a plan shows itself instead.
+        if status == .needsApproval, let tool, tool.name != PlanReview.tool { return tool.name }
         return detail
     }
 
@@ -348,15 +349,117 @@ extension AgentSession {
 /// Answers an agent's permission request from Lookout; its terminal dialog closes too.
 struct ApprovalButtons: View {
     let decide: (PermissionDecision) -> Void
+    /// ⌘Y and ⌘N answer it: for one agent at a time, the first in the panel or the selected one.
+    var shortcuts = false
 
     var body: some View {
         HStack(spacing: 8) {
             Button("Deny") { decide(.deny) }
+                .keyboardShortcut("n", enabled: shortcuts)
             Button("Allow") { decide(.allow) }
                 .buttonStyle(.borderedProminent)
                 .tint(.orange)
+                .keyboardShortcut("y", enabled: shortcuts)
+            if shortcuts { ShortcutHint(text: "⌘Y · ⌘N") }
         }
         .controlSize(.small)
+    }
+}
+
+struct ShortcutHint: View {
+    let text: String
+
+    var body: some View {
+        Text(text).font(.caption).foregroundStyle(.tertiary)
+    }
+}
+
+extension View {
+    @ViewBuilder
+    func keyboardShortcut(_ key: KeyEquivalent, enabled: Bool) -> some View {
+        if enabled { keyboardShortcut(key) } else { self }
+    }
+}
+
+/// Claude's plan, with feedback to send from here. Approving happens in the terminal: Claude ignores a
+/// hook's allow for a plan.
+struct PlanReviewBox: View {
+    let plan: String
+    let decide: (PermissionDecision) -> Void
+    let approveInTerminal: () -> Void
+    /// Scrolls past this; nil shows the whole plan.
+    var maxHeight: CGFloat?
+
+    @State private var feedback = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ScrollView {
+                MarkdownText(markdown: plan)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxHeight: maxHeight)
+            .fixedSize(horizontal: false, vertical: maxHeight == nil)
+            .background(.background.opacity(0.6), in: RoundedRectangle(cornerRadius: 6))
+            TextField("Tell Claude what to change", text: $feedback, axis: .vertical)
+                .lineLimit(1...4)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit(send)
+            HStack(spacing: 8) {
+                Button("Send Feedback", action: send)
+                    .disabled(trimmed.isEmpty)
+                Button("Approve in Terminal", action: approveInTerminal)
+                    .buttonStyle(.borderedProminent).tint(.orange)
+            }
+        }
+        .controlSize(.small)
+    }
+
+    private var trimmed: String { feedback.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    private func send() {
+        guard !trimmed.isEmpty else { return }
+        decide(.feedback(trimmed))
+    }
+}
+
+/// A plan's Markdown: headings, lists, code blocks and inline styling.
+struct MarkdownText: View {
+    let markdown: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(Array(MarkdownBlock.parse(markdown).enumerated()), id: \.offset) { _, block in
+                switch block {
+                case .heading(let level, let text):
+                    inline(text).font(level == 1 ? .headline : .subheadline.weight(.semibold))
+                        .padding(.top, level == 1 ? 0 : 4)
+                case .item(let marker, let indent, let text):
+                    HStack(alignment: .firstTextBaseline, spacing: 5) {
+                        Text(marker).foregroundStyle(.secondary).monospacedDigit()
+                        inline(text)
+                    }
+                    .padding(.leading, CGFloat(indent) * 14)
+                case .code(let code):
+                    Text(code).font(.system(.caption, design: .monospaced))
+                        .padding(6)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 4))
+                case .paragraph(let text):
+                    inline(text)
+                case .rule:
+                    Divider()
+                }
+            }
+        }
+        .font(.callout)
+        .textSelection(.enabled)
+    }
+
+    private func inline(_ text: String) -> Text {
+        let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        return Text((try? AttributedString(markdown: text, options: options)) ?? AttributedString(text))
     }
 }
 
@@ -365,6 +468,8 @@ struct ApprovalButtons: View {
 struct QuestionForm: View {
     let questions: [AgentQuestion]
     let decide: (PermissionDecision) -> Void
+    /// ⌘1–⌘9 pick the options of a single question (the menu panel's first agent).
+    var shortcuts = false
 
     @State private var picked: [Int: Set<String>] = [:]
     @State private var typed: [Int: String] = [:]
@@ -376,8 +481,9 @@ struct QuestionForm: View {
                     if questions.count > 1 || question.multiSelect {
                         Text(question.text).font(.callout.weight(.medium))
                     }
-                    ForEach(question.options, id: \.label) { option in
-                        optionButton(i, question, option)
+                    ForEach(Array(question.options.enumerated()), id: \.element.label) { n, option in
+                        let key = shortcuts && questions.count == 1 && n < 9 ? n + 1 : nil
+                        optionButton(i, question, option, key: key)
                     }
                     TextField(question.options.isEmpty ? "Answer" : "Or type your own", text: typedBinding(i))
                         .textFieldStyle(.roundedBorder)
@@ -397,7 +503,7 @@ struct QuestionForm: View {
         questions.count == 1 && !questions[0].multiSelect && !questions[0].options.isEmpty
     }
 
-    private func optionButton(_ i: Int, _ question: AgentQuestion, _ option: AgentQuestion.Option) -> some View {
+    private func optionButton(_ i: Int, _ question: AgentQuestion, _ option: AgentQuestion.Option, key: Int?) -> some View {
         let on = picked[i, default: []].contains(option.label)
         return Button {
             if sendsOnClick {
@@ -424,11 +530,13 @@ struct QuestionForm: View {
                     }
                 }
                 Spacer(minLength: 0)
+                if let key { ShortcutHint(text: "⌘\(key)") }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
         }
         .buttonStyle(.bordered)
+        .keyboardShortcut(KeyEquivalent(Character(String(key ?? 0))), enabled: key != nil)
         .help(option.description ?? option.label)
         .accessibilityLabel(option.label)
     }

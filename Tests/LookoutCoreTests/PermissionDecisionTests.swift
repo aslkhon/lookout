@@ -15,12 +15,26 @@ struct PermissionDecisionTests {
     }
 
     @Test func wireRoundTrip() {
-        for decision in [PermissionDecision.allow, .deny, .answer(["Q1?": "Red, Blue", "Q2?": "line\nbreak \"quoted\""])] {
+        for decision in [PermissionDecision.allow, .deny, .answer(["Q1?": "Red, Blue", "Q2?": "line\nbreak \"quoted\""]),
+                         .feedback("Use greeting.txt.\nAnd keep it short.")] {
             #expect(PermissionDecision(wire: decision.wire) == decision)
         }
         #expect(PermissionDecision(wire: "allowed") == nil)
+        #expect(PermissionDecision(wire: "feedback\n  ") == nil)
         #expect(PermissionDecision(wire: "answer\n[1]") == nil)
         #expect(PermissionDecision(wire: "answer\n{\"q\":1}") == nil)
+    }
+
+    @Test func feedbackIsADenyWithTheMessage() {
+        #expect(String(decoding: PermissionDecision.feedback("Use greeting.txt").hookOutput(), as: UTF8.self)
+            == #"{"hookSpecificOutput":{"decision":{"behavior":"deny","message":"Use greeting.txt"},"hookEventName":"PermissionRequest"}}"#)
+    }
+
+    @Test func plans() {
+        let input: [String: JSONValue] = ["plan": .string("# Plan\n1. Do it"), "planFilePath": .string("/p.md")]
+        #expect(PlanReview.plan(input, tool: "ExitPlanMode") == "# Plan\n1. Do it")
+        #expect(PlanReview.plan(input, tool: "Bash") == nil)
+        #expect(PlanReview.plan(["plan": .string("")], tool: "ExitPlanMode") == nil)
     }
 
     @Test func remoteRequestIDs() {

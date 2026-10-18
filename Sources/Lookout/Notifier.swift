@@ -77,6 +77,9 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         guard !silenced(session) else { return }
         let content = UNMutableNotificationContent()
         switch session.status {
+        case .needsApproval where session.tool?.name == PlanReview.tool:
+            content.title = "\(session.projectName) has a plan"
+            content.body = "Ready for review"
         case .needsApproval:
             content.title = "\(session.projectName) needs approval"
             content.body = session.detail ?? "Waiting for permission"
@@ -96,7 +99,10 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         content.sound = sound
         content.userInfo = ["sessionID": session.id]
         if let request {
-            if session.status == .needsApproval { content.categoryIdentifier = Self.approvalCategory } // not for questions
+            // Not for questions, nor plans: Claude ignores a hook's allow for a plan.
+            if session.status == .needsApproval, session.tool?.name != PlanReview.tool {
+                content.categoryIdentifier = Self.approvalCategory
+            }
             content.userInfo["request"] = request.uuidString
         }
         // Reusing the session id replaces any earlier notification for the same agent.

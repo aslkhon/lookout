@@ -42,6 +42,28 @@ struct HookInstallerTests {
         #expect(backups.count == 1)
     }
 
+    @Test func permissionRequestsGetTimeToBeAnswered() throws {
+        try installer.install(.claude)
+        let hooks = try #require(try readJSON(installer.claudeSettingsURL)["hooks"] as? [String: Any])
+        func timeout(_ event: String) -> Int? {
+            let group = (hooks[event] as? [[String: Any]])?.first
+            return (group?["hooks"] as? [[String: Any]])?.first?["timeout"] as? Int
+        }
+        #expect(timeout("PermissionRequest") == 600)
+        #expect(timeout("Stop") == 10)
+    }
+
+    @Test func upgradesShortPermissionTimeout() throws {
+        try installer.install(.claude)
+        let url = installer.claudeSettingsURL
+        let current = try String(contentsOf: url, encoding: .utf8)
+        let old = current.replacingOccurrences(of: #""timeout"\s*:\s*600"#, with: #""timeout": 10"#, options: .regularExpression)
+        #expect(old != current)
+        try old.write(to: url, atomically: true, encoding: .utf8)
+        installer.upgradeInstalled()
+        #expect(try String(contentsOf: url, encoding: .utf8).contains("600"))
+    }
+
     @Test func installIsIdempotent() throws {
         try installer.install(.claude)
         try installer.install(.claude)

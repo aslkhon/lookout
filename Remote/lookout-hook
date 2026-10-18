@@ -205,8 +205,9 @@ def hook(source):
     full_input = json.loads(json.dumps(tool_input)) if isinstance(tool_input, dict) else {}  # an answer goes back with all of it
     if isinstance(tool_input, dict):
         for key, value in list(tool_input.items()):
-            if isinstance(value, str) and len(value) > 300:
-                tool_input[key] = value[:300]
+            limit = 64 * 1024 if key == "plan" else 300  # Lookout shows the whole plan (PlanReview.maxLength)
+            if isinstance(value, str) and len(value) > limit:
+                tool_input[key] = value[:limit]
             elif not isinstance(value, (str, int, float, bool)) and key != "questions":
                 del tool_input[key]
 
@@ -277,6 +278,8 @@ def await_decision(decision_id, full_input, tool_name):
             decision = {"behavior": head}
             if head == "deny":
                 decision["message"] = "Denied from Lookout"
+        elif head == "feedback" and rest.strip():
+            decision = {"behavior": "deny", "message": rest.strip()}
         elif head == "answer" and tool_name == "AskUserQuestion":  # an answer allows with changed input
             try:
                 answers = json.loads(rest)
@@ -483,7 +486,9 @@ def removing_lookout(hooks):
 def adding_lookout(hooks, events, command, matcher_events):
     result = removing_lookout(hooks)
     for event in events:
-        group = {"hooks": [{"type": "command", "command": command, "timeout": 10}]}
+        # A permission request waits up to 590 s for an answer from Lookout.
+        timeout = 600 if event == "PermissionRequest" else 10
+        group = {"hooks": [{"type": "command", "command": command, "timeout": timeout}]}
         if event in matcher_events:
             group["matcher"] = "*"
         result[event] = list(result.get(event, [])) + [group]

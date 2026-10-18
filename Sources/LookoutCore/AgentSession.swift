@@ -140,6 +140,7 @@ public enum SessionReducer {
             if let tool = p.toolName, questionTools.contains(tool) {
                 return (.needsInput, questionText(p) ?? "Asked a question")
             }
+            if p.toolName == PlanReview.tool { return (.needsApproval, "Plan ready for review") }
             return (.needsApproval, p.toolSummary)
         case "Notification":
             switch p.notificationType {

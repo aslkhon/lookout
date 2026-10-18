@@ -39,6 +39,14 @@ struct SessionReducerTests {
         #expect(result.last?.detail == "Which color?")
     }
 
+    @Test func planReviewNeedsApproval() {
+        let input: [String: JSONValue] = ["plan": .string("# Plan")]
+        let result = replay([payload("PermissionRequest", tool: "ExitPlanMode", input: input)], source: .claude)
+        #expect(result.statuses == [.needsApproval])
+        #expect(result.last?.detail == "Plan ready for review")
+        #expect(result.last?.tool?.name == "ExitPlanMode")
+    }
+
     @Test func stallsAfterTenQuietMinutesWhileWorking() {
         let start = Date(timeIntervalSince1970: 1_000_000)
         func env(_ p: HookPayload) -> HookEnvelope { HookEnvelope(source: .claude, context: HookContext(), payload: p) }

@@ -19,7 +19,7 @@ final class AppModel: ObservableObject {
     private var livenessTimer: Timer?
     /// Permission hooks waiting for Allow or Deny, by session. Each request has its own id, so a click on
     /// a stale notification or button can't answer a newer request it never showed.
-    @Published private var approvals: [String: (request: UUID, pending: any PendingApproval, questions: [AgentQuestion])] = [:]
+    @Published private var approvals: [String: (request: UUID, pending: any PendingApproval, questions: [AgentQuestion], plan: String?)] = [:]
     /// Sessions that have sent hook events; their status comes from hooks, not discovery.
     private var hookDriven: Set<String> = []
 
@@ -42,6 +42,7 @@ final class AppModel: ObservableObject {
             return
         }
         installHookBinary()
+        installer.upgradeInstalled()
         VSCodeExtension.upgradeInstalled()
         let server = EventServer(path: LookoutPaths.socket.path) { data, responder in
             let envelope: HookEnvelope
@@ -92,8 +93,10 @@ final class AppModel: ObservableObject {
         let pending: (any PendingApproval)? = responder
             ?? envelope.host.flatMap { RemoteHosts.Approval(host: $0, id: envelope.context.decisionID) }
         if let pending {
-            let questions = AgentQuestion.parse(envelope.payload.toolInput, tool: envelope.payload.toolName)
-            approvals.updateValue((UUID(), pending, questions), forKey: key)?.pending.answer(nil)
+            let p = envelope.payload
+            let questions = AgentQuestion.parse(p.toolInput, tool: p.toolName)
+            let plan = PlanReview.plan(p.toolInput, tool: p.toolName)
+            approvals.updateValue((UUID(), pending, questions, plan), forKey: key)?.pending.answer(nil)
         } else if !new.status.needsAttention {
             approvals.removeValue(forKey: key)?.pending.answer(nil)
         }
@@ -118,6 +121,9 @@ final class AppModel: ObservableObject {
 
     /// The questions in this agent's held request, if it's asking some.
     func questions(for session: AgentSession) -> [AgentQuestion] { approvals[session.id]?.questions ?? [] }
+
+    /// The plan in this agent's held request, if it's asking to leave plan mode.
+    func plan(for session: AgentSession) -> String? { approvals[session.id]?.plan }
 
     func decide(_ key: String, request: UUID, _ decision: PermissionDecision) {
         guard approvals[key]?.request == request else { return } // already answered, or replaced by a newer request
@@ -145,6 +151,7 @@ final class AppModel: ObservableObject {
     private func refresh() {
         checkLiveness()
         checkStalls()
+        KeepAwake.shared.update(working: sessions.values.contains { $0.status == .working && !$0.stalled })
         updateLocalDetails()
         Task.detached(priority: .utility) {
             let found = AgentDiscovery.scan()

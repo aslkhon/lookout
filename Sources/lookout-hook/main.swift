@@ -22,7 +22,8 @@ let fullToolInput = payload["tool_input"] as? [String: Any] ?? [:] // an answer 
 payload.removeValue(forKey: "tool_response")
 if var toolInput = payload["tool_input"] as? [String: Any] {
     for (key, value) in toolInput {
-        if let s = value as? String, s.count > 300 { toolInput[key] = String(s.prefix(300)) }
+        let limit = key == "plan" ? PlanReview.maxLength : 300 // Lookout shows the whole plan
+        if let s = value as? String, s.count > limit { toolInput[key] = String(s.prefix(limit)) }
         else if !(value is String || value is NSNumber) && key != "questions" { toolInput.removeValue(forKey: key) }
     }
     payload["tool_input"] = toolInput

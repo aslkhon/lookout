@@ -90,6 +90,7 @@ struct MenuContentView: View {
     @ViewBuilder
     private var list: some View {
         let groups = Dictionary(grouping: sessions, by: \.status.group)
+        let first = groups[.needsYou]?.first { model.decider(for: $0) != nil }?.id // gets the shortcuts
         VStack(alignment: .leading, spacing: 4) {
             ForEach([AgentStatus.Group.needsYou, .working, .finished], id: \.self) { group in
                 if let members = groups[group], !members.isEmpty {
@@ -97,6 +98,7 @@ struct MenuContentView: View {
                         .padding(.horizontal, 8).padding(.top, group == .needsYou ? 0 : 8)
                     ForEach(members) { session in
                         MenuAgentRow(session: session, questions: model.questions(for: session),
+                                     plan: model.plan(for: session), shortcuts: session.id == first,
                                      decide: model.decider(for: session)) {
                             focus(session)
                         }
@@ -235,6 +237,9 @@ struct MenuAgentRow: View {
     let session: AgentSession
     /// The questions in its held request, if it's asking some.
     var questions: [AgentQuestion] = []
+    /// The plan in its held request, if it's asking to leave plan mode.
+    var plan: String?
+    var shortcuts = false
     /// Answers its permission request or questions, when Lookout holds it.
     var decide: ((PermissionDecision) -> Void)?
     let action: () -> Void
@@ -245,10 +250,13 @@ struct MenuAgentRow: View {
             row
             if let decide { // outside the row's button: buttons don't nest
                 Group {
-                    if !questions.isEmpty {
-                        QuestionForm(questions: questions, decide: decide).id(session.statusSince)
+                    if let plan {
+                        PlanReviewBox(plan: plan, decide: decide, approveInTerminal: action, maxHeight: 220)
+                            .id(session.statusSince)
+                    } else if !questions.isEmpty {
+                        QuestionForm(questions: questions, decide: decide, shortcuts: shortcuts).id(session.statusSince)
                     } else if session.status == .needsApproval {
-                        ApprovalButtons(decide: decide)
+                        ApprovalButtons(decide: decide, shortcuts: shortcuts)
                     }
                 }
                 .padding(.leading, 30).padding(.trailing, 10).padding(.bottom, 8)

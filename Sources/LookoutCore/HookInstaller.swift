@@ -51,6 +51,19 @@ public struct HookInstaller {
         }
     }
 
+    /// Reinstalls hooks set up by an older version whose PermissionRequest hook timed out after 10 s.
+    public func upgradeInstalled() {
+        for source in AgentSource.allCases where isInstalled(source) {
+            guard let hooks = (try? readJSON(configURL(for: source)))?["hooks"] as? [String: Any],
+                  events(for: source).contains("PermissionRequest") else { continue }
+            let entries = (hooks["PermissionRequest"] as? [Any] ?? []).flatMap {
+                (($0 as? [String: Any])?["hooks"] as? [Any] ?? []).compactMap { $0 as? [String: Any] }
+            }
+            let timeouts = entries.filter(Self.isLookout).map { $0["timeout"] as? Int }
+            if timeouts != [600] { try? install(source) }
+        }
+    }
+
     /// Number of Lookout hook entries in the agent's config.
     public func entryCount(_ source: AgentSource) -> Int {
         guard let root = try? readJSON(configURL(for: source)),
@@ -88,7 +101,9 @@ public struct HookInstaller {
                               matcherEvents: Set<String>) -> [String: Any] {
         var result = removingLookout(from: hooks)
         for event in events {
-            var group: [String: Any] = ["hooks": [["type": "command", "command": command, "timeout": 10]]]
+            // A permission request waits up to 590 s for an answer from Lookout.
+            let timeout = event == "PermissionRequest" ? 600 : 10
+            var group: [String: Any] = ["hooks": [["type": "command", "command": command, "timeout": timeout]]]
             if matcherEvents.contains(event) { group["matcher"] = "*" }
             result[event] = (result[event] as? [Any] ?? []) + [group]
         }

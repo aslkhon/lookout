@@ -14,11 +14,8 @@ struct RemoteHostsSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                SectionTitle(title: "Remote hosts")
-                Text("One ssh connection per host, nothing listening. Needs key-based login and python3.")
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-            }
+            Text("One ssh connection per host, nothing listening. Needs key-based login and python3.")
+                .font(.caption).foregroundStyle(.secondary) // the Setup tab names the section
             VStack(spacing: 0) {
                 ForEach(remotes.hosts, id: \.self) { host in
                     hostRow(host)

@@ -65,6 +65,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Self.shared = self
         _ = Notifier.shared // become the notification delegate before any click arrives
         AwayWatcher.shared.start()
+        GlobalShortcut.shared.update()
         AppModel.shared.start()
         if AppModel.shared.needsSetup {
             showSetup()
