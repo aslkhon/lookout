@@ -23,6 +23,6 @@
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSAppleEventsUsageDescription</key>
-	<string>Lookout uses Automation to focus the Ghostty terminal running your agent.</string>
+	<string>Lookout uses Automation to focus the terminal tab running your agent.</string>
 </dict>
 </plist>

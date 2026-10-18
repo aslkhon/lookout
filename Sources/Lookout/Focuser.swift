@@ -16,8 +16,15 @@ enum Focuser {
 
     static func focus(_ session: AgentSession) {
         if session.host != nil { return focusRemote(session) }
+        // In tmux: make the pane current, then bring up the terminal showing that tmux client.
+        if session.termProgram == "tmux", let tty = session.tty, let client = selectTmuxPane(tty: tty) {
+            guard let app = appBundleID(owning: client.pid) ?? session.hostBundleID else { return }
+            if !focusTab(bundleID: app, tty: client.tty) { activate(bundleID: app) }
+            return
+        }
         guard let bundleID = session.hostBundleID else { return }
         if bundleID == ghosttyID, focusGhostty(cwd: session.cwd) { return }
+        if let tty = session.tty, focusTab(bundleID: bundleID, tty: tty) { return }
         if let support = vscodeFamily[bundleID] {
             // Exact window and terminal from the Lookout extension, else best guess by folder.
             let match = session.agentPID.flatMap { VSCodeRegistry.match(agentPID: $0) }
