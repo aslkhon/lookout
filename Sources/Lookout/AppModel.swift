@@ -10,6 +10,8 @@ final class AppModel: ObservableObject {
 
     @Published private(set) var sessions: [String: AgentSession] = [:]
     @Published var serverError: String?
+    /// A project for the dashboard to show when it next opens (from a compact-mode card).
+    @Published var showProject: String?
 
     let installer = HookInstaller()
     let remotes = RemoteHosts()

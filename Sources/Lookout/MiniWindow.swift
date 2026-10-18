@@ -24,7 +24,8 @@ struct MiniView: View {
                     VStack(spacing: 6) {
                         ForEach(projects.indices.filter { $0 % columns == column }, id: \.self) { i in
                             MiniCard(name: projects[i].key, sessions: projects[i].value,
-                                     focus: { model.focus($0) }, openDashboard: openDashboard)
+                                     focus: { model.focus($0) },
+                                     openDashboard: { model.showProject = projects[i].key; openDashboard() })
                         }
                     }
                 }
@@ -59,7 +60,8 @@ struct MiniView: View {
     }
 }
 
-/// A project card: its header, then a row per agent. Click a row to jump to that agent's terminal.
+/// A project card: its header, then a row per agent. Click a row to jump to that agent's terminal,
+/// or the header to see the project in the full window.
 private struct MiniCard: View {
     let name: String
     let sessions: [AgentSession]
@@ -89,7 +91,8 @@ private struct MiniCard: View {
             }
             .padding(.horizontal, 6).padding(.vertical, 4)
             .contentShape(Rectangle())
-            .onTapGesture(count: 2, perform: openDashboard)
+            .onTapGesture(perform: openDashboard)
+            .help("Show \(name) in the full window")
             ForEach(sessions) { session in
                 Divider().padding(.leading, 6)
                 MiniRow(session: session)

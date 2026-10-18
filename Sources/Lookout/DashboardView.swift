@@ -105,6 +105,14 @@ struct DashboardView: View {
         .onChange(of: columns) { showsSidebar = columns != .detailOnly }
         .navigationSubtitle(countLabel)
         .background(FloatingWindow(floating: onTop))
+        .onChange(of: model.showProject, initial: true) { _, project in
+            guard let project else { return }
+            model.showProject = nil
+            status = nil; hostFilter = .all; source = nil
+            query = project
+            collapsed.remove(project)
+            selectedID = visible.first { $0.projectName == project }?.id
+        }
         .onChange(of: model.attentionCount, initial: true) { _, count in
             NSApp.dockTile.badgeLabel = count > 0 ? "\(count)" : nil
         }
