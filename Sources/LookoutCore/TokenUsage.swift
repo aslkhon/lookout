@@ -66,8 +66,11 @@ public struct TokenUsage: Equatable, Sendable {
 /// Running token totals per transcript file; each call reads only what was appended since the last.
 public actor TokenTally {
     private var files: [URL: (offset: UInt64, usage: TokenUsage, lastID: String?)] = [:]
+    private let chunk: Int
 
-    public init() {}
+    public init(chunk: Int = 4 << 20) {
+        self.chunk = chunk
+    }
 
     public func usage(of url: URL, source: AgentSource) -> TokenUsage {
         var state = files[url] ?? (0, TokenUsage(), nil)
@@ -76,9 +79,16 @@ public actor TokenTally {
         let end = (try? handle.seekToEnd()) ?? 0
         if end < state.offset { state = (0, TokenUsage(), nil) } // rewritten
         try? handle.seek(toOffset: state.offset)
-        while state.offset < end, let data = try? handle.read(upToCount: 4 << 20), !data.isEmpty {
+        while state.offset < end, let data = try? handle.read(upToCount: chunk), !data.isEmpty {
             // Whole lines only: the last one may still be being written.
-            guard let last = data.lastIndex(of: UInt8(ascii: "\n")) else { break }
+            guard let last = data.lastIndex(of: UInt8(ascii: "\n")) else {
+                // A line longer than a chunk (a screenshot) holds no usage: skip past it, or stop
+                // if it's still being written.
+                guard data.count == chunk, let next = nextLine(handle) else { break }
+                state.offset = next
+                try? handle.seek(toOffset: state.offset)
+                continue
+            }
             for line in data[...last].split(separator: UInt8(ascii: "\n")) {
                 state.usage.add(line: Data(line), source: source, lastID: &state.lastID)
             }
@@ -87,5 +97,15 @@ public actor TokenTally {
         }
         files[url] = state
         return state.usage
+    }
+
+    /// The offset just after the next line break, reading on from the handle's position.
+    private func nextLine(_ handle: FileHandle) -> UInt64? {
+        while let data = try? handle.read(upToCount: chunk), !data.isEmpty {
+            if let i = data.firstIndex(of: UInt8(ascii: "\n")) {
+                return (try? handle.offset()).map { $0 - UInt64(data.endIndex - i - 1) }
+            }
+        }
+        return nil
     }
 }

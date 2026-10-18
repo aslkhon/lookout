@@ -36,6 +36,13 @@ struct TokenUsageTests {
         #expect(await tally.usage(of: url, source: .claude).total == 3555)
     }
 
+    @Test func skipsLinesLongerThanAChunk() async throws {
+        let huge = #"{"type":"user","message":{"content":""# + String(repeating: "x", count: 3000) + #""}}"#
+        let url = try write([claude[0], huge, huge] + claude[1...])
+        defer { try? FileManager.default.removeItem(at: url) }
+        #expect(await TokenTally(chunk: 1024).usage(of: url, source: .claude) == TokenUsage(input: 15, cacheRead: 1900, cacheWrite: 90, output: 1550))
+    }
+
     @Test func codexTakesTheLatestRunningTotal() async throws {
         let url = try write([
             #"{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":60,"output_tokens":7}}}}"#,
