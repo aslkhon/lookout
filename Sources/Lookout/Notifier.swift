@@ -30,8 +30,44 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         .map { ($0 as NSString).deletingPathExtension }
         .sorted()
 
-    private var sound: UNNotificationSound? {
-        switch UserDefaults.standard.string(forKey: Self.soundKey) ?? "Default" {
+    /// The kinds of notification that can each have their own sound, per agent.
+    enum SoundEvent: String, CaseIterable {
+        case approval, question, finished
+
+        var label: String {
+            switch self {
+            case .approval: "Approval or plan"
+            case .question: "Question"
+            case .finished: "Finished"
+            }
+        }
+
+        init?(_ status: AgentStatus) {
+            switch status {
+            case .needsApproval: self = .approval
+            case .needsInput: self = .question
+            case .finished: self = .finished
+            default: return nil
+            }
+        }
+    }
+
+    /// UserDefaults key for one agent's sound for one event; missing or "" uses the main sound.
+    static func soundKey(_ source: AgentSource, _ event: SoundEvent) -> String {
+        "\(soundKey).\(source.rawValue).\(event.rawValue)"
+    }
+
+    private var sound: UNNotificationSound? { Self.sound(named: UserDefaults.standard.string(forKey: Self.soundKey) ?? "Default") }
+
+    private func sound(for session: AgentSession) -> UNNotificationSound? {
+        guard !session.stalled, let event = SoundEvent(session.status),
+              let name = UserDefaults.standard.string(forKey: Self.soundKey(session.source, event)), !name.isEmpty
+        else { return sound }
+        return Self.sound(named: name)
+    }
+
+    private static func sound(named name: String) -> UNNotificationSound? {
+        switch name {
         case "Default": .default
         case "None": nil
         case let name: UNNotificationSound(named: UNNotificationSoundName(name))
@@ -55,10 +91,12 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
     }
 
-    /// Quiet hours, or a muted project. The menu bar and windows still show who needs you.
+    /// Quiet hours, presenting, or a muted project. The menu bar and windows still show who needs you.
     private func silenced(_ session: AgentSession) -> Bool {
-        muted(session) || quietNow
+        muted(session) || quietNow || presentingNow
     }
+
+    private var presentingNow: Bool { Presenting.enabled && Presenting.now }
 
     private func muted(_ session: AgentSession) -> Bool {
         UserDefaults.standard.bool(forKey: ProjectStyle.mutedKey(session.projectName))
@@ -96,7 +134,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             return
         }
         content.subtitle = session.source.displayName
-        content.sound = sound
+        content.sound = sound(for: session)
         content.userInfo = ["sessionID": session.id]
         if let request {
             // Not for questions, nor plans: Claude ignores a hook's allow for a plan.
@@ -112,7 +150,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     /// "While you were away": one notification for everything that happened, minus muted projects.
     /// Clicking it opens the dashboard.
     func postSummary(sessions: [AgentSession], since: Date, away: TimeInterval) {
-        guard !quietNow, let text = AwaySummary.text(for: sessions.filter { !muted($0) }, since: since) else { return }
+        guard !quietNow, !presentingNow, let text = AwaySummary.text(for: sessions.filter { !muted($0) }, since: since) else { return }
         let content = UNMutableNotificationContent()
         content.title = "While you were away · \(Format.duration(away))"
         content.body = text

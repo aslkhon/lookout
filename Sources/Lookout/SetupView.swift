@@ -27,6 +27,7 @@ struct SetupView: View {
     @AppStorage(Notifier.quietKey) private var quietHours = false
     @AppStorage(Notifier.quietStartKey) private var quietStart = Notifier.defaultQuietStart
     @AppStorage(Notifier.quietEndKey) private var quietEnd = Notifier.defaultQuietEnd
+    @AppStorage(Presenting.key) private var silenceWhilePresenting = true
     @AppStorage(KeepAwake.key) private var keepAwake = false
     @AppStorage(GlobalShortcut.key) private var globalShortcut = true
     /// Bumped after file changes so installed states are re-read.
@@ -155,17 +156,11 @@ struct SetupView: View {
             }
         }
         Divider()
-        SetupRow(state: nil, title: "Notification sound", subtitle: "Plays with every Lookout notification.") {
-            Picker("", selection: $sound) {
-                Text("Default").tag("Default")
-                Text("None").tag("None")
-                Divider()
-                ForEach(Notifier.systemSounds, id: \.self) { Text($0).tag($0) }
-            }
-            .labelsHidden()
-            .fixedSize()
-            .onChange(of: sound) { _, name in NSSound(named: name)?.play() } // preview
+        SetupRow(state: nil, title: "Notification sound", subtitle: "Plays with every notification, unless it has its own sound below.") {
+            SoundPicker(selection: $sound)
         }
+        Divider()
+        eventSounds
         Divider()
         SetupRow(state: nil, title: "Quiet hours",
                  subtitle: "No notifications in these hours; the menu bar still shows who needs you. Mute a single project from its right-click menu.") {
@@ -181,6 +176,37 @@ struct SetupView: View {
                 .disabled(!quietHours)
             }
         }
+        Divider()
+        SetupRow(state: nil, title: "Silence while presenting",
+                 subtitle: "No notifications while you share or record the screen, mirror a display, or play a Keynote or PowerPoint slideshow.") {
+            Toggle("", isOn: $silenceWhilePresenting).toggleStyle(.switch).controlSize(.small).labelsHidden()
+        }
+    }
+
+    /// A sound for each agent and kind of notification, so you can tell them apart without looking.
+    private var eventSounds: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Sounds by agent").fontWeight(.semibold)
+                Text("Tell Claude Code from Codex, and a question from a finished turn, by ear.")
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
+                GridRow {
+                    Text("")
+                    ForEach(AgentSource.allCases, id: \.self) { Text($0.displayName).font(.callout).foregroundStyle(.secondary) }
+                }
+                ForEach(Notifier.SoundEvent.allCases, id: \.self) { event in
+                    GridRow {
+                        Text(event.label).font(.callout)
+                        ForEach(AgentSource.allCases, id: \.self) { source in
+                            EventSoundPicker(key: Notifier.soundKey(source, event))
+                        }
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 11)
     }
 
     @ViewBuilder
@@ -360,6 +386,34 @@ struct SetupView: View {
 }
 
 /// One line in a Setup card: status icon, title and subtitle, actions on the right.
+/// "Default", "None" or a macOS sound; plays the sound when picked.
+struct SoundPicker: View {
+    @Binding var selection: String
+    /// The first choice's label and tag; per-event pickers use it for "the main sound".
+    var inherit: (label: String, tag: String) = ("Default", "Default")
+
+    var body: some View {
+        Picker("", selection: $selection) {
+            Text(inherit.label).tag(inherit.tag)
+            if inherit.tag != "Default" { Text("Default").tag("Default") }
+            Text("None").tag("None")
+            Divider()
+            ForEach(Notifier.systemSounds, id: \.self) { Text($0).tag($0) }
+        }
+        .labelsHidden()
+        .fixedSize()
+        .onChange(of: selection) { _, name in NSSound(named: name)?.play() } // preview
+    }
+}
+
+private struct EventSoundPicker: View {
+    @AppStorage private var selection: String
+
+    init(key: String) { _selection = AppStorage(wrappedValue: "", key) }
+
+    var body: some View { SoundPicker(selection: $selection, inherit: ("Same as above", "")) }
+}
+
 struct SetupRow<Actions: View>: View {
     enum State { case ok, missing, warning, failed, unknown }
 
