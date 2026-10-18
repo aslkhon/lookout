@@ -28,6 +28,8 @@ struct DashboardView: View {
     /// The project whose icon picker is open. Kept here: list rows are rebuilt as agents update.
     @State private var editingIcon: String?
     @State private var listWidth: CGFloat = 0
+    /// The grid has keyboard focus, so arrow keys move the selection (and not the search field's cursor).
+    @FocusState private var gridFocused: Bool
 
     /// Wide enough for project cards side by side; narrow enough for compact rows.
     private static let gridWidth: CGFloat = 940
@@ -455,22 +457,44 @@ struct DashboardView: View {
     private var projectGrid: some View {
         let ended = endedByProject
         let projects = projects
-        return ScrollView {
-            Grid(horizontalSpacing: 12, verticalSpacing: 12) {
-                ForEach(Array(stride(from: 0, to: projects.count, by: 2)), id: \.self) { i in
-                    GridRow(alignment: .top) {
-                        ForEach(projects[i..<min(i + 2, projects.count)], id: \.name) { project in
-                            projectTile(project, endedHidden: ended[project.name] ?? 0)
-                        }
-                        if i + 1 == projects.count {
-                            Color.clear.frame(maxWidth: .infinity).gridCellUnsizedAxes(.vertical)
+        return ScrollViewReader { proxy in
+            ScrollView {
+                Grid(horizontalSpacing: 12, verticalSpacing: 12) {
+                    ForEach(Array(stride(from: 0, to: projects.count, by: 2)), id: \.self) { i in
+                        GridRow(alignment: .top) {
+                            ForEach(projects[i..<min(i + 2, projects.count)], id: \.name) { project in
+                                projectTile(project, endedHidden: ended[project.name] ?? 0)
+                            }
+                            if i + 1 == projects.count {
+                                Color.clear.frame(maxWidth: .infinity).gridCellUnsizedAxes(.vertical)
+                            }
                         }
                     }
                 }
+                .padding(16)
             }
-            .padding(16)
+            .focusable()
+            .focusEffectDisabled()
+            .focused($gridFocused)
+            .onMoveCommand(perform: moveSelection)
+            .onChange(of: selectedID) { _, id in
+                if let id { withAnimation(.snappy(duration: 0.2)) { proxy.scrollTo(id) } }
+            }
         }
         .environment(\.compactRows, true)
+    }
+
+    /// Arrow keys in the grid; see `GridNavigation`.
+    private func moveSelection(_ direction: MoveCommandDirection) {
+        let cards = projects.map { collapsed.contains($0.name) ? [] : $0.sessions.map(\.id) }
+        let direction: GridNavigation.Direction = switch direction {
+        case .up: .up
+        case .down: .down
+        case .left: .left
+        case .right: .right
+        @unknown default: .down
+        }
+        selectedID = GridNavigation.next(after: selectedID, in: cards, direction)
     }
 
     private func projectTile(_ project: Project, endedHidden: Int) -> some View {
@@ -490,15 +514,17 @@ struct DashboardView: View {
     }
 
     /// A grid row: click selects, double-click focuses the terminal, right-click for the menu.
+    /// Arrow keys then move the selection.
     private func tileRow(_ session: AgentSession) -> some View {
         let isSelected = session.id == selectedID
         return ProjectRow(session: session)
+            .id(session.id) // for scrolling to it
             .environment(\.backgroundProminence, isSelected ? .increased : .standard)
             .foregroundStyle(isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
             .background(isSelected ? Color.accentColor : .clear, in: RoundedRectangle(cornerRadius: 6))
             .contentShape(Rectangle())
             .onTapGesture(count: 2) { model.focus(session) }
-            .simultaneousGesture(TapGesture().onEnded { selectedID = session.id })
+            .simultaneousGesture(TapGesture().onEnded { selectedID = session.id; gridFocused = true })
             .contextMenu { menu(for: session) }
     }
 
