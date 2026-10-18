@@ -83,6 +83,10 @@ final class AppModel: ObservableObject {
             new.name = name // remote hooks look this up on the server
         }
         sessions[key] = new
+        if new.status == .finished, let old, old.status == .working || old.status.needsAttention,
+           let duration = new.lastTurnDuration {
+            TurnLog.append(TurnRecord(end: Date(), project: new.projectName, source: new.source, host: new.host, duration: duration))
+        }
         log.debug("\(key, privacy: .public) \(envelope.payload.hookEventName, privacy: .public) → \(new.status.rawValue, privacy: .public) pid=\(new.agentPID.map(String.init) ?? "nil", privacy: .public)")
         if SessionReducer.shouldNotify(from: old?.status, to: new.status) {
             Notifier.shared.post(for: new)

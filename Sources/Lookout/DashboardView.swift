@@ -28,6 +28,7 @@ struct DashboardView: View {
     /// The project whose icon picker is open. Kept here: list rows are rebuilt as agents update.
     @State private var editingIcon: String?
     @State private var listWidth: CGFloat = 0
+    @State private var showsUsage = false
     /// The grid has keyboard focus, so arrow keys move the selection (and not the search field's cursor).
     @FocusState private var gridFocused: Bool
 
@@ -103,6 +104,7 @@ struct DashboardView: View {
                 ProjectStylePicker(project: project) { editingIcon = nil }
             }
         }
+        .sheet(isPresented: $showsUsage) { UsageView { showsUsage = false } }
         .navigationTitle("Lookout")
         .onChange(of: columns) { showsSidebar = columns != .detailOnly }
         .navigationSubtitle(countLabel)
@@ -255,6 +257,10 @@ struct DashboardView: View {
         }
         ToolbarItem { pinToggle }
         ToolbarItem { miniToggle }
+        ToolbarItem {
+            Button("Usage", systemImage: "chart.bar") { showsUsage = true }
+                .help("Turns and agent time per project")
+        }
         ToolbarItem {
             if layout == .byStatus {
                 Button("Clear Ended", systemImage: "clear") { model.clearEnded() }
