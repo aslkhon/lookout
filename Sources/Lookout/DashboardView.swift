@@ -123,7 +123,10 @@ struct DashboardView: View {
         .inspector(isPresented: $showsDetail) {
             Group {
                 if let session = selected {
-                    AgentDetailView(session: session) { model.focus(session) }
+                    AgentDetailView(session: session,
+                                    decide: model.canDecide(session) ? { model.decide(session.id, $0) } : nil) {
+                        model.focus(session)
+                    }
                 } else {
                     ContentUnavailableView("No Agent Selected", systemImage: "binoculars",
                                            description: Text("Select an agent to see its details. Double-click to jump to its terminal."))
@@ -841,6 +844,8 @@ private struct CardPiece: View {
 
 struct AgentDetailView: View {
     let session: AgentSession
+    /// Answers its permission request, when Lookout holds it.
+    var decide: ((PermissionDecision) -> Void)?
     let focus: () -> Void
 
     @State private var copied = false
@@ -910,6 +915,7 @@ struct AgentDetailView: View {
             } else if let detail = session.detail {
                 Text(detail).textSelection(.enabled)
             }
+            if let decide { ApprovalButtons(decide: decide) }
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)

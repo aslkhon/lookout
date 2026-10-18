@@ -96,7 +96,9 @@ struct MenuContentView: View {
                     SectionTitle(title: group.title, count: members.count, color: group.color)
                         .padding(.horizontal, 8).padding(.top, group == .needsYou ? 0 : 8)
                     ForEach(members) { session in
-                        MenuAgentRow(session: session) { focus(session) }
+                        MenuAgentRow(session: session, decide: model.canDecide(session) ? { model.decide(session.id, $0) } : nil) {
+                            focus(session)
+                        }
                     }
                 }
             }
@@ -230,10 +232,25 @@ private struct HeightKey: PreferenceKey {
 /// One agent in the menu panel. Agents that need you get a tinted card and their pending command.
 struct MenuAgentRow: View {
     let session: AgentSession
+    /// Answers its permission request, when Lookout holds it.
+    var decide: ((PermissionDecision) -> Void)?
     let action: () -> Void
     @State private var hovering = false
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            row
+            if let decide { // outside the row's button: buttons don't nest
+                ApprovalButtons(decide: decide).padding(.leading, 30).padding(.bottom, 8)
+            }
+        }
+        .background(background, in: RoundedRectangle(cornerRadius: 8))
+        .onHover { hovering = $0 }
+        .help(session.cwd)
+        .opacity(session.status == .ended ? 0.6 : 1)
+    }
+
+    private var row: some View {
         Button(action: action) {
             HStack(alignment: .top, spacing: 10) {
                 StatusDot(status: session.status, size: session.needsYou ? 10 : 8)
@@ -255,12 +272,8 @@ struct MenuAgentRow: View {
             }
             .padding(.horizontal, 8).padding(.vertical, 8)
             .contentShape(Rectangle())
-            .background(background, in: RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
-        .onHover { hovering = $0 }
-        .help(session.cwd)
-        .opacity(session.status == .ended ? 0.6 : 1)
     }
 
     private var titleLine: some View {

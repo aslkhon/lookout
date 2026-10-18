@@ -345,6 +345,21 @@ extension AgentSession {
     }
 }
 
+/// Answers an agent's permission request from Lookout; its terminal dialog closes too.
+struct ApprovalButtons: View {
+    let decide: (PermissionDecision) -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button("Deny") { decide(.deny) }
+            Button("Allow") { decide(.allow) }
+                .buttonStyle(.borderedProminent)
+                .tint(.orange)
+        }
+        .controlSize(.small)
+    }
+}
+
 enum Format {
     /// "now", "4m", "2h", "12d".
     static func ago(_ date: Date, now: Date = Date()) -> String {

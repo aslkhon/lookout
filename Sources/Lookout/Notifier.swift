@@ -8,6 +8,10 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
 
     /// Called with a session id when the user clicks a notification.
     var onActivate: ((String) -> Void)?
+    /// Called with a session id when the user clicks Allow or Deny on an approval notification.
+    var onDecide: ((String, PermissionDecision) -> Void)?
+
+    private static let approvalCategory = "approval"
 
     private var center: UNUserNotificationCenter { .current() }
 
@@ -37,6 +41,11 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     override init() {
         super.init()
         center.delegate = self
+        center.setNotificationCategories([UNNotificationCategory(
+            identifier: Self.approvalCategory,
+            actions: [UNNotificationAction(identifier: PermissionDecision.allow.rawValue, title: "Allow"),
+                      UNNotificationAction(identifier: PermissionDecision.deny.rawValue, title: "Deny", options: .destructive)],
+            intentIdentifiers: [])])
     }
 
     @discardableResult
@@ -61,7 +70,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         return quiet.contains(Date())
     }
 
-    func post(for session: AgentSession) {
+    /// `decidable`: Lookout holds the agent's permission request, so the notification gets Allow and Deny.
+    func post(for session: AgentSession, decidable: Bool = false) {
         guard !silenced(session) else { return }
         let content = UNMutableNotificationContent()
         switch session.status {
@@ -83,6 +93,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         content.subtitle = session.source.displayName
         content.sound = sound
         content.userInfo = ["sessionID": session.id]
+        if decidable { content.categoryIdentifier = Self.approvalCategory }
         // Reusing the session id replaces any earlier notification for the same agent.
         center.add(UNNotificationRequest(identifier: session.id, content: content, trigger: nil))
     }
@@ -128,6 +139,10 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             await MainActor.run { NSApp.activate(); AppDelegate.openDashboard?() }
         }
         guard let id = info["sessionID"] as? String else { return }
-        await MainActor.run { onActivate?(id) }
+        if let decision = PermissionDecision(rawValue: response.actionIdentifier) {
+            await MainActor.run { onDecide?(id, decision) }
+        } else if response.actionIdentifier == UNNotificationDefaultActionIdentifier {
+            await MainActor.run { onActivate?(id) }
+        }
     }
 }

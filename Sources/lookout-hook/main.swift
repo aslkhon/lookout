@@ -1,7 +1,9 @@
 // lookout-hook: invoked by Claude Code / Codex hooks as `lookout-hook <claude|codex>`.
 // Reads the hook payload from stdin, adds process/terminal context, and forwards it to
 // Lookout.app over a Unix socket. It must never print to stdout (Claude treats stdout as
-// hook output), never block the agent, and always exit 0.
+// hook output), never block the agent, and always exit 0. The one exception: on a Claude
+// PermissionRequest it waits for Allow or Deny from Lookout and prints that decision. Claude's
+// own dialog stays usable meanwhile, and Lookout closes the connection once it's answered there.
 
 import Darwin
 import Foundation
@@ -78,6 +80,8 @@ context["agentPID"] = agent.map { Int($0.pid) }
 context["tty"] = tty
 context["termProgram"] = env["TERM_PROGRAM"]
 context["hostBundleID"] = env["__CFBundleIdentifier"]
+let awaitsDecision = source == "claude" && payload["hook_event_name"] as? String == "PermissionRequest"
+if awaitsDecision { context["awaitsDecision"] = true }
 
 let envelope: [String: Any] = ["source": source, "context": context, "payload": payload]
 guard let body = try? JSONSerialization.data(withJSONObject: envelope) else { exit(0) }
@@ -111,6 +115,16 @@ if connected == 0 {
             let n = write(fd, raw.baseAddress! + offset, raw.count - offset)
             if n <= 0 { break }
             offset += n
+        }
+    }
+    if awaitsDecision {
+        shutdown(fd, SHUT_WR) // sent: Lookout replies on this connection, or closes it without a decision
+        var wait = timeval(tv_sec: 590, tv_usec: 0) // under Claude's 600 s hook timeout
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &wait, socklen_t(MemoryLayout<timeval>.size))
+        var reply = [UInt8](repeating: 0, count: 64)
+        let n = read(fd, &reply, reply.count)
+        if n > 0, let decision = PermissionDecision(rawValue: String(decoding: reply.prefix(n), as: UTF8.self)) {
+            FileHandle.standardOutput.write(decision.hookOutput)
         }
     }
 }

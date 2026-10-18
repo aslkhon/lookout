@@ -17,6 +17,8 @@ final class AppModel: ObservableObject {
     let remotes = RemoteHosts()
     private var server: EventServer?
     private var livenessTimer: Timer?
+    /// Permission hooks waiting for Allow or Deny, by session.
+    @Published private var approvals: [String: Responder] = [:]
     /// Sessions that have sent hook events; their status comes from hooks, not discovery.
     private var hookDriven: Set<String> = []
 
@@ -40,7 +42,7 @@ final class AppModel: ObservableObject {
         }
         installHookBinary()
         VSCodeExtension.upgradeInstalled()
-        let server = EventServer(path: LookoutPaths.socket.path) { data in
+        let server = EventServer(path: LookoutPaths.socket.path) { data, responder in
             let envelope: HookEnvelope
             do {
                 envelope = try JSONDecoder().decode(HookEnvelope.self, from: data)
@@ -48,7 +50,8 @@ final class AppModel: ObservableObject {
                 log.error("Undecodable hook message: \(error.localizedDescription, privacy: .public)")
                 return
             }
-            Task { @MainActor in AppModel.shared.handle(envelope) }
+            let waiting = envelope.context.awaitsDecision == true ? responder : nil
+            Task { @MainActor in AppModel.shared.handle(envelope, responder: waiting) }
         }
         do {
             try server.start()
@@ -67,9 +70,10 @@ final class AppModel: ObservableObject {
             guard let session = self?.sessions[id] else { return }
             Focuser.focus(session)
         }
+        Notifier.shared.onDecide = { [weak self] id, decision in self?.decide(id, decision) }
     }
 
-    func handle(_ envelope: HookEnvelope) {
+    func handle(_ envelope: HookEnvelope, responder: Responder? = nil) {
         let key = AgentSession.key(source: envelope.source, sessionID: envelope.payload.sessionID, host: envelope.host)
         hookDriven.insert(key)
         // A Codex agent found by scanning becomes this session once its hooks report in.
@@ -83,16 +87,29 @@ final class AppModel: ObservableObject {
             new.name = name // remote hooks look this up on the server
         }
         sessions[key] = new
+        // Hold a waiting permission hook until the user answers here; once answered anywhere, let it go.
+        if let responder {
+            approvals[key] = responder
+        } else if new.status != .needsApproval {
+            approvals[key] = nil
+        }
         if new.status == .finished, let old, old.status == .working || old.status.needsAttention,
            let duration = new.lastTurnDuration {
             TurnLog.append(TurnRecord(end: Date(), project: new.projectName, source: new.source, host: new.host, duration: duration))
         }
         log.debug("\(key, privacy: .public) \(envelope.payload.hookEventName, privacy: .public) → \(new.status.rawValue, privacy: .public) pid=\(new.agentPID.map(String.init) ?? "nil", privacy: .public)")
         if SessionReducer.shouldNotify(from: old?.status, to: new.status) {
-            Notifier.shared.post(for: new)
+            Notifier.shared.post(for: new, decidable: approvals[key] != nil)
         } else if old?.status != new.status {
             Notifier.shared.clear(sessionID: key)
         }
+    }
+
+    /// Whether Lookout can answer this agent's permission request.
+    func canDecide(_ session: AgentSession) -> Bool { approvals[session.id] != nil }
+
+    func decide(_ id: String, _ decision: PermissionDecision) {
+        approvals.removeValue(forKey: id)?.reply(decision.rawValue)
     }
 
     func focus(_ session: AgentSession) {
@@ -128,7 +145,7 @@ final class AppModel: ObservableObject {
     private func checkStalls() {
         for (key, session) in sessions where hookDriven.contains(key) && !session.stalled && SessionReducer.isStalled(session) {
             sessions[key]?.stalled = true
-            sessions[key].map(Notifier.shared.post)
+            sessions[key].map { Notifier.shared.post(for: $0) }
         }
     }
 
@@ -148,6 +165,7 @@ final class AppModel: ObservableObject {
     }
 
     private func end(_ key: String) {
+        approvals[key] = nil
         guard var session = sessions[key] else { return }
         session.status = .ended
         session.statusSince = Date()

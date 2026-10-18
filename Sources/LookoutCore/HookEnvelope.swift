@@ -48,6 +48,8 @@ public struct HookContext: Codable, Sendable {
     /// Git branch of the agent's directory and the agent's start time, from the server.
     public var branch: String?
     public var startedAt: Double?
+    /// A Claude PermissionRequest hook waiting on its connection for Allow or Deny from Lookout.
+    public var awaitsDecision: Bool?
 
     public init(agentPID: Int32? = nil, tty: String? = nil, termProgram: String? = nil,
                 hostBundleID: String? = nil, timestamp: Double = Date().timeIntervalSince1970,
