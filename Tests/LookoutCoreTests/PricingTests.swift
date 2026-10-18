@@ -51,5 +51,6 @@ struct PricingTests {
     @Test func formatting() {
         #expect(Pricing.format(0.004) == "<$0.01")
         #expect(Pricing.format(12.3) == "$12.30")
+        #expect(Pricing.format(1e30).hasPrefix("$")) // no Int overflow
     }
 }

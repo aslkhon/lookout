@@ -92,6 +92,7 @@ public enum Pricing {
     public static func format(_ dollars: Double) -> String {
         if dollars < 0.01 { return "<$0.01" }
         if dollars < 1000 { return String(format: "$%.2f", dollars) }
-        return "$" + Int(dollars.rounded()).formatted()
+        // Not through Int: counts from an ssh host aren't trusted and could overflow it.
+        return "$" + dollars.formatted(.number.precision(.fractionLength(0)))
     }
 }

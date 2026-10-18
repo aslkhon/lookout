@@ -972,7 +972,7 @@ struct AgentDetailView: View {
             }
             row("Last event", session.lastEventAt.formatted(date: .omitted, time: .shortened))
             row("Tokens", usage.flatMap { $0.total > 0 ? $0.summary : nil })
-            row("Cost", usage?.cost.flatMap { $0 > 0 ? "~\(Pricing.format($0)) at API prices" : nil })
+            row("Cost", usage?.cost.flatMap { $0 > 0 && $0.isFinite ? "~\(Pricing.format($0)) at API prices" : nil })
         }
         .font(.callout)
         .onChange(of: session.id) { copied = false }
