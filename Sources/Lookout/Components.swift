@@ -459,7 +459,9 @@ struct MarkdownText: View {
 
     private func inline(_ text: String) -> Text {
         let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        return Text((try? AttributedString(markdown: text, options: options)) ?? AttributedString(text))
+        var styled = (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
+        styled.link = nil // agent-written text; a link could open any URL scheme
+        return Text(styled)
     }
 }
 
