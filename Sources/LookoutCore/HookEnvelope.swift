@@ -50,6 +50,8 @@ public struct HookContext: Codable, Sendable {
     public var startedAt: Double?
     /// A Claude PermissionRequest hook waiting on its connection for Allow or Deny from Lookout.
     public var awaitsDecision: Bool?
+    /// The same, on an ssh host: the hook waits for Lookout to write the answer to ~/.lookout/decisions/<id>.
+    public var decisionID: String?
 
     public init(agentPID: Int32? = nil, tty: String? = nil, termProgram: String? = nil,
                 hostBundleID: String? = nil, timestamp: Double = Date().timeIntervalSince1970,

@@ -10,4 +10,12 @@ struct PermissionDecisionTests {
             == #"{"hookSpecificOutput":{"decision":{"behavior":"deny","message":"Denied from Lookout"},"hookEventName":"PermissionRequest"}}"#)
         #expect(PermissionDecision(rawValue: "allow") == .allow && PermissionDecision(rawValue: "x") == nil)
     }
+
+    @Test func remoteRequestIDs() {
+        #expect(PermissionDecision.isValidRequestID("0123456789abcdef0123456789abcdef"))
+        #expect(!PermissionDecision.isValidRequestID("0123456789ABCDEF0123456789abcdef"))
+        #expect(!PermissionDecision.isValidRequestID("0123456789abcdef0123456789abcde"))
+        #expect(!PermissionDecision.isValidRequestID("../../.ssh/authorized_keys;rm -rf"))
+        #expect(!PermissionDecision.isValidRequestID("0123456789abcdef0123456789abcde'"))
+    }
 }

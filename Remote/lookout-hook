@@ -17,6 +17,7 @@ import json
 import os
 import sys
 import time
+import uuid
 
 VERSION = 1
 HOME = os.path.expanduser("~")
@@ -26,6 +27,8 @@ SELF = os.path.join(ROOT, "bin", "lookout-hook")
 MARKER = "lookout-hook"
 MAX_EVENTS_BYTES = 5 * 1024 * 1024
 SNAPSHOT_INTERVAL = 5.0
+WATCHING = os.path.join(ROOT, "watching")  # touched by --watch while Lookout is connected
+DECISIONS = os.path.join(ROOT, "decisions")
 
 CLAUDE_EVENTS = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse",
                  "PostToolUseFailure", "PermissionRequest", "Notification", "Stop", "SessionEnd"]
@@ -215,6 +218,10 @@ def hook(source):
         name = codex_session_name(payload.get("session_id"))
         if name:
             context["sessionName"] = name
+    decision_id = None
+    if source == "claude" and payload.get("hook_event_name") == "PermissionRequest" and lookout_connected():
+        decision_id = uuid.uuid4().hex
+        context["decisionID"] = decision_id
     line = json.dumps({"source": source, "context": context, "payload": payload}) + "\n"
 
     ensure_private()
@@ -228,6 +235,47 @@ def hook(source):
         os.write(fd, line.encode("utf-8"))  # one O_APPEND write per event
     finally:
         os.close(fd)
+    if decision_id:
+        await_decision(decision_id)
+
+
+def lookout_connected():
+    try:
+        return time.time() - os.path.getmtime(WATCHING) < 3 * SNAPSHOT_INTERVAL
+    except OSError:
+        return False
+
+
+def await_decision(decision_id):
+    """Waits for Allow or Deny from Lookout, which writes it to ~/.lookout/decisions/<id> over ssh, or "none"
+    once the request was answered in the terminal (whose dialog stays usable meanwhile). Prints the decision
+    for Claude Code as the Mac's hook does (PermissionDecision.swift)."""
+    os.makedirs(DECISIONS, mode=0o700, exist_ok=True)
+    for name in os.listdir(DECISIONS):  # answers for hooks that had already given up
+        try:
+            if time.time() - os.path.getmtime(os.path.join(DECISIONS, name)) > 3600:
+                os.remove(os.path.join(DECISIONS, name))
+        except OSError:
+            pass
+    path = os.path.join(DECISIONS, decision_id)
+    deadline = time.time() + 590  # under Claude's 600 s hook timeout
+    while time.time() < deadline and lookout_connected():
+        try:
+            with open(path) as f:
+                answer = f.read().strip()
+        except OSError:
+            time.sleep(0.5)
+            continue
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        if answer in ("allow", "deny"):
+            decision = {"behavior": answer}
+            if answer == "deny":
+                decision["message"] = "Denied from Lookout"
+            sys.stdout.write(json.dumps({"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": decision}}))
+        return
 
 
 # MARK: Watch mode
@@ -349,6 +397,8 @@ def watch():
                 emit({"type": "event", "envelope": envelope})
         now = time.time()
         if now >= next_snapshot:
+            with open(WATCHING, "a"):
+                os.utime(WATCHING)  # permission hooks wait for an answer only while this is fresh
             agents = claude_agents() + codex_agents()
             seen = {pid for pid in seen if alive(pid)}
             emit({"type": "agents", "agents": agents,

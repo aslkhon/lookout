@@ -124,7 +124,7 @@ struct DashboardView: View {
             Group {
                 if let session = selected {
                     AgentDetailView(session: session,
-                                    decide: model.canDecide(session) ? { model.decide(session.id, $0) } : nil) {
+                                    decide: model.decider(for: session)) {
                         model.focus(session)
                     }
                 } else {

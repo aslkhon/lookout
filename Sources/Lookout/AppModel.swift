@@ -17,8 +17,9 @@ final class AppModel: ObservableObject {
     let remotes = RemoteHosts()
     private var server: EventServer?
     private var livenessTimer: Timer?
-    /// Permission hooks waiting for Allow or Deny, by session.
-    @Published private var approvals: [String: Responder] = [:]
+    /// Permission hooks waiting for Allow or Deny, by session. Each request has its own id, so a click on
+    /// a stale notification or button can't answer a newer request it never showed.
+    @Published private var approvals: [String: (request: UUID, pending: any PendingApproval)] = [:]
     /// Sessions that have sent hook events; their status comes from hooks, not discovery.
     private var hookDriven: Set<String> = []
 
@@ -70,7 +71,7 @@ final class AppModel: ObservableObject {
             guard let session = self?.sessions[id] else { return }
             Focuser.focus(session)
         }
-        Notifier.shared.onDecide = { [weak self] id, decision in self?.decide(id, decision) }
+        Notifier.shared.onDecide = { [weak self] id, request, decision in self?.decide(id, request: request, decision) }
     }
 
     func handle(_ envelope: HookEnvelope, responder: Responder? = nil) {
@@ -88,28 +89,35 @@ final class AppModel: ObservableObject {
         }
         sessions[key] = new
         // Hold a waiting permission hook until the user answers here; once answered anywhere, let it go.
-        if let responder {
-            approvals[key] = responder
+        let pending: (any PendingApproval)? = responder
+            ?? envelope.host.flatMap { RemoteHosts.Approval(host: $0, id: envelope.context.decisionID) }
+        if let pending {
+            approvals.updateValue((UUID(), pending), forKey: key)?.pending.answer(nil)
         } else if new.status != .needsApproval {
-            approvals[key] = nil
+            approvals.removeValue(forKey: key)?.pending.answer(nil)
         }
         if new.status == .finished, let old, old.status == .working || old.status.needsAttention,
            let duration = new.lastTurnDuration {
             TurnLog.append(TurnRecord(end: Date(), project: new.projectName, source: new.source, host: new.host, duration: duration))
         }
         log.debug("\(key, privacy: .public) \(envelope.payload.hookEventName, privacy: .public) → \(new.status.rawValue, privacy: .public) pid=\(new.agentPID.map(String.init) ?? "nil", privacy: .public)")
-        if SessionReducer.shouldNotify(from: old?.status, to: new.status) {
-            Notifier.shared.post(for: new, decidable: approvals[key] != nil)
+        // A held request always gets its own notification, also when it replaces an earlier one.
+        if SessionReducer.shouldNotify(from: old?.status, to: new.status) || pending != nil {
+            Notifier.shared.post(for: new, request: approvals[key]?.request)
         } else if old?.status != new.status {
             Notifier.shared.clear(sessionID: key)
         }
     }
 
-    /// Whether Lookout can answer this agent's permission request.
-    func canDecide(_ session: AgentSession) -> Bool { approvals[session.id] != nil }
+    /// Answers this agent's current permission request, when Lookout holds one.
+    func decider(for session: AgentSession) -> ((PermissionDecision) -> Void)? {
+        guard let request = approvals[session.id]?.request else { return nil }
+        return { [weak self] in self?.decide(session.id, request: request, $0) }
+    }
 
-    func decide(_ id: String, _ decision: PermissionDecision) {
-        approvals.removeValue(forKey: id)?.reply(decision.rawValue)
+    func decide(_ key: String, request: UUID, _ decision: PermissionDecision) {
+        guard approvals[key]?.request == request else { return } // already answered, or replaced by a newer request
+        approvals.removeValue(forKey: key)?.pending.answer(decision)
     }
 
     func focus(_ session: AgentSession) {
@@ -165,7 +173,7 @@ final class AppModel: ObservableObject {
     }
 
     private func end(_ key: String) {
-        approvals[key] = nil
+        approvals.removeValue(forKey: key)?.pending.answer(nil)
         guard var session = sessions[key] else { return }
         session.status = .ended
         session.statusSince = Date()

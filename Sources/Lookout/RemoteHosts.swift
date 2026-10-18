@@ -130,6 +130,25 @@ final class RemoteHosts: ObservableObject {
         }.value
     }
 
+    /// A permission hook on `host` polling ~/.lookout/decisions/<id> for the answer.
+    struct Approval: PendingApproval {
+        let host: String
+        let id: String
+
+        init?(host: String, id: String?) {
+            guard let id, PermissionDecision.isValidRequestID(id) else { return nil }
+            self.host = host
+            self.id = id
+        }
+
+        func answer(_ decision: PermissionDecision?) {
+            // Moved into place whole, so the hook never reads half an answer.
+            let dir = "~/.lookout/decisions"
+            let command = "mkdir -p \(dir) && printf %s \(decision?.rawValue ?? "none") > \(dir)/\(id).tmp && mv \(dir)/\(id).tmp \(dir)/\(id)"
+            Task { _ = try? await RemoteHosts.run(host, command) }
+        }
+    }
+
     nonisolated static func lastLine(_ data: Data) -> String? {
         String(decoding: data, as: UTF8.self)
             .split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }

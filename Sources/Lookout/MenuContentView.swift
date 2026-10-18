@@ -96,7 +96,7 @@ struct MenuContentView: View {
                     SectionTitle(title: group.title, count: members.count, color: group.color)
                         .padding(.horizontal, 8).padding(.top, group == .needsYou ? 0 : 8)
                     ForEach(members) { session in
-                        MenuAgentRow(session: session, decide: model.canDecide(session) ? { model.decide(session.id, $0) } : nil) {
+                        MenuAgentRow(session: session, decide: model.decider(for: session)) {
                             focus(session)
                         }
                     }
