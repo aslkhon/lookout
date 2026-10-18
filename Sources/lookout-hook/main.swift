@@ -4,6 +4,7 @@
 // hook output), never block the agent, and always exit 0. The one exception: on a Claude
 // PermissionRequest it waits for Allow or Deny from Lookout and prints that decision. Claude's
 // own dialog stays usable meanwhile, and Lookout closes the connection once it's answered there.
+// Claude's questions (AskUserQuestion) come as permission requests too; Lookout can answer those.
 
 import Darwin
 import Foundation
@@ -17,6 +18,7 @@ guard AgentSource(rawValue: source) != nil else { exit(0) }
 // Read the payload; drop bulky fields the app doesn't need.
 let input = FileHandle.standardInput.readDataToEndOfFile()
 guard var payload = (try? JSONSerialization.jsonObject(with: input)) as? [String: Any] else { exit(0) }
+let fullToolInput = payload["tool_input"] as? [String: Any] ?? [:] // an answer goes back with all of it
 payload.removeValue(forKey: "tool_response")
 if var toolInput = payload["tool_input"] as? [String: Any] {
     for (key, value) in toolInput {
@@ -121,10 +123,15 @@ if connected == 0 {
         shutdown(fd, SHUT_WR) // sent: Lookout replies on this connection, or closes it without a decision
         var wait = timeval(tv_sec: 590, tv_usec: 0) // under Claude's 600 s hook timeout
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &wait, socklen_t(MemoryLayout<timeval>.size))
-        var reply = [UInt8](repeating: 0, count: 64)
-        let n = read(fd, &reply, reply.count)
-        if n > 0, let decision = PermissionDecision(rawValue: String(decoding: reply.prefix(n), as: UTF8.self)) {
-            FileHandle.standardOutput.write(decision.hookOutput)
+        var reply = Data()
+        var buf = [UInt8](repeating: 0, count: 16 * 1024)
+        while reply.count < 1 << 20 { // until Lookout closes the connection
+            let n = read(fd, &buf, buf.count)
+            if n <= 0 { break }
+            reply.append(buf, count: n)
+        }
+        if let decision = PermissionDecision(wire: String(decoding: reply, as: UTF8.self)) {
+            FileHandle.standardOutput.write(decision.hookOutput(toolInput: fullToolInput))
         }
     }
 }

@@ -96,7 +96,8 @@ struct MenuContentView: View {
                     SectionTitle(title: group.title, count: members.count, color: group.color)
                         .padding(.horizontal, 8).padding(.top, group == .needsYou ? 0 : 8)
                     ForEach(members) { session in
-                        MenuAgentRow(session: session, decide: model.decider(for: session)) {
+                        MenuAgentRow(session: session, questions: model.questions(for: session),
+                                     decide: model.decider(for: session)) {
                             focus(session)
                         }
                     }
@@ -232,7 +233,9 @@ private struct HeightKey: PreferenceKey {
 /// One agent in the menu panel. Agents that need you get a tinted card and their pending command.
 struct MenuAgentRow: View {
     let session: AgentSession
-    /// Answers its permission request, when Lookout holds it.
+    /// The questions in its held request, if it's asking some.
+    var questions: [AgentQuestion] = []
+    /// Answers its permission request or questions, when Lookout holds it.
     var decide: ((PermissionDecision) -> Void)?
     let action: () -> Void
     @State private var hovering = false
@@ -241,7 +244,14 @@ struct MenuAgentRow: View {
         VStack(alignment: .leading, spacing: 0) {
             row
             if let decide { // outside the row's button: buttons don't nest
-                ApprovalButtons(decide: decide).padding(.leading, 30).padding(.bottom, 8)
+                Group {
+                    if !questions.isEmpty {
+                        QuestionForm(questions: questions, decide: decide).id(session.statusSince)
+                    } else if session.status == .needsApproval {
+                        ApprovalButtons(decide: decide)
+                    }
+                }
+                .padding(.leading, 30).padding(.trailing, 10).padding(.bottom, 8)
             }
         }
         .background(background, in: RoundedRectangle(cornerRadius: 8))

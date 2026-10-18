@@ -142,10 +142,12 @@ final class RemoteHosts: ObservableObject {
         }
 
         func answer(_ decision: PermissionDecision?) {
-            // Moved into place whole, so the hook never reads half an answer.
+            // The answer goes through stdin, never into the command (it can hold the user's own words),
+            // and is moved into place whole, so the hook never reads half of it.
             let dir = "~/.lookout/decisions"
-            let command = "mkdir -p \(dir) && printf %s \(decision?.rawValue ?? "none") > \(dir)/\(id).tmp && mv \(dir)/\(id).tmp \(dir)/\(id)"
-            Task { _ = try? await RemoteHosts.run(host, command) }
+            let command = "mkdir -p \(dir) && cat > \(dir)/\(id).tmp && mv \(dir)/\(id).tmp \(dir)/\(id)"
+            let input = Data((decision?.wire ?? "none").utf8)
+            Task { _ = try? await RemoteHosts.run(host, command, input: input) }
         }
     }
 

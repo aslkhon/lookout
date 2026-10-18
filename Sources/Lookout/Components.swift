@@ -329,7 +329,7 @@ extension AgentSession {
 
     /// "Needs approval · Bash: npm test"-style text after the status label.
     var statusDetail: String? {
-        if status.needsAttention, let tool { return tool.name }
+        if status == .needsApproval, let tool { return tool.name } // a question shows itself instead
         return detail
     }
 
@@ -357,6 +357,106 @@ struct ApprovalButtons: View {
                 .tint(.orange)
         }
         .controlSize(.small)
+    }
+}
+
+/// Answers Claude's questions: click an option, or type your own answer. A single question with
+/// a single choice is sent on the click; otherwise with Send once every question has an answer.
+struct QuestionForm: View {
+    let questions: [AgentQuestion]
+    let decide: (PermissionDecision) -> Void
+
+    @State private var picked: [Int: Set<String>] = [:]
+    @State private var typed: [Int: String] = [:]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(Array(questions.enumerated()), id: \.offset) { i, question in
+                VStack(alignment: .leading, spacing: 6) {
+                    if questions.count > 1 || question.multiSelect {
+                        Text(question.text).font(.callout.weight(.medium))
+                    }
+                    ForEach(question.options, id: \.label) { option in
+                        optionButton(i, question, option)
+                    }
+                    TextField(question.options.isEmpty ? "Answer" : "Or type your own", text: typedBinding(i))
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit { if complete { send() } }
+                }
+            }
+            if !sendsOnClick {
+                Button("Send", action: send)
+                    .buttonStyle(.borderedProminent).tint(.orange)
+                    .disabled(!complete)
+            }
+        }
+        .controlSize(.small)
+    }
+
+    private var sendsOnClick: Bool {
+        questions.count == 1 && !questions[0].multiSelect && !questions[0].options.isEmpty
+    }
+
+    private func optionButton(_ i: Int, _ question: AgentQuestion, _ option: AgentQuestion.Option) -> some View {
+        let on = picked[i, default: []].contains(option.label)
+        return Button {
+            if sendsOnClick {
+                decide(.answer([question.text: option.label]))
+                return
+            }
+            if question.multiSelect {
+                picked[i, default: []].formSymmetricDifference([option.label])
+            } else {
+                picked[i] = on ? [] : [option.label]
+            }
+            typed[i] = nil
+        } label: {
+            HStack(spacing: 6) {
+                if !sendsOnClick {
+                    Image(systemName: on ? (question.multiSelect ? "checkmark.square.fill" : "largecircle.fill.circle")
+                                         : (question.multiSelect ? "square" : "circle"))
+                        .foregroundStyle(on ? .orange : .secondary)
+                }
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(option.label)
+                    if let description = option.description {
+                        Text(description).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.bordered)
+        .help(option.description ?? option.label)
+        .accessibilityLabel(option.label)
+    }
+
+    private func typedBinding(_ i: Int) -> Binding<String> {
+        Binding(get: { typed[i] ?? "" }, set: {
+            typed[i] = $0
+            if !$0.isEmpty { picked[i] = nil }
+        })
+    }
+
+    /// Typed words win over picked options.
+    private func answer(_ i: Int) -> String? {
+        let text = (typed[i] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !text.isEmpty { return text }
+        let labels = questions[i].options.map(\.label).filter { picked[i, default: []].contains($0) }
+        return labels.isEmpty ? nil : labels.joined(separator: ", ")
+    }
+
+    private var complete: Bool { questions.indices.allSatisfy { answer($0) != nil } }
+
+    private func send() {
+        var answers: [String: String] = [:]
+        for i in questions.indices {
+            guard let a = answer(i) else { return }
+            answers[questions[i].text] = a
+        }
+        decide(.answer(answers))
     }
 }
 

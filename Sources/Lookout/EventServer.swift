@@ -86,7 +86,13 @@ final class Responder: PendingApproval, @unchecked Sendable {
         lock.withLock {
             guard fd >= 0 else { return }
             if let decision {
-                _ = decision.rawValue.utf8CString.withUnsafeBufferPointer { write(fd, $0.baseAddress, $0.count - 1) }
+                let bytes = Array(decision.wire.utf8)
+                var offset = 0
+                while offset < bytes.count {
+                    let n = bytes[offset...].withUnsafeBytes { write(fd, $0.baseAddress, $0.count) }
+                    if n <= 0 { break }
+                    offset += n
+                }
             }
             close(fd)
             fd = -1

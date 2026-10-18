@@ -19,7 +19,7 @@ final class AppModel: ObservableObject {
     private var livenessTimer: Timer?
     /// Permission hooks waiting for Allow or Deny, by session. Each request has its own id, so a click on
     /// a stale notification or button can't answer a newer request it never showed.
-    @Published private var approvals: [String: (request: UUID, pending: any PendingApproval)] = [:]
+    @Published private var approvals: [String: (request: UUID, pending: any PendingApproval, questions: [AgentQuestion])] = [:]
     /// Sessions that have sent hook events; their status comes from hooks, not discovery.
     private var hookDriven: Set<String> = []
 
@@ -92,8 +92,9 @@ final class AppModel: ObservableObject {
         let pending: (any PendingApproval)? = responder
             ?? envelope.host.flatMap { RemoteHosts.Approval(host: $0, id: envelope.context.decisionID) }
         if let pending {
-            approvals.updateValue((UUID(), pending), forKey: key)?.pending.answer(nil)
-        } else if new.status != .needsApproval {
+            let questions = AgentQuestion.parse(envelope.payload.toolInput)
+            approvals.updateValue((UUID(), pending, questions), forKey: key)?.pending.answer(nil)
+        } else if !new.status.needsAttention {
             approvals.removeValue(forKey: key)?.pending.answer(nil)
         }
         if new.status == .finished, let old, old.status == .working || old.status.needsAttention,
@@ -114,6 +115,9 @@ final class AppModel: ObservableObject {
         guard let request = approvals[session.id]?.request else { return nil }
         return { [weak self] in self?.decide(session.id, request: request, $0) }
     }
+
+    /// The questions in this agent's held request, if it's asking some.
+    func questions(for session: AgentSession) -> [AgentQuestion] { approvals[session.id]?.questions ?? [] }
 
     func decide(_ key: String, request: UUID, _ decision: PermissionDecision) {
         guard approvals[key]?.request == request else { return } // already answered, or replaced by a newer request

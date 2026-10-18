@@ -123,7 +123,7 @@ struct DashboardView: View {
         .inspector(isPresented: $showsDetail) {
             Group {
                 if let session = selected {
-                    AgentDetailView(session: session,
+                    AgentDetailView(session: session, questions: model.questions(for: session),
                                     decide: model.decider(for: session)) {
                         model.focus(session)
                     }
@@ -844,7 +844,9 @@ private struct CardPiece: View {
 
 struct AgentDetailView: View {
     let session: AgentSession
-    /// Answers its permission request, when Lookout holds it.
+    /// The questions in its held request, if it's asking some.
+    var questions: [AgentQuestion] = []
+    /// Answers its permission request or questions, when Lookout holds it.
     var decide: ((PermissionDecision) -> Void)?
     let focus: () -> Void
 
@@ -915,7 +917,13 @@ struct AgentDetailView: View {
             } else if let detail = session.detail {
                 Text(detail).textSelection(.enabled)
             }
-            if let decide { ApprovalButtons(decide: decide) }
+            if let decide {
+                if !questions.isEmpty {
+                    QuestionForm(questions: questions, decide: decide).id(session.statusSince)
+                } else if session.status == .needsApproval {
+                    ApprovalButtons(decide: decide)
+                }
+            }
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)

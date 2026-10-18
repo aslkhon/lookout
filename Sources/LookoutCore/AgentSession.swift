@@ -136,6 +136,10 @@ public enum SessionReducer {
         case "PostToolUse", "PostToolUseFailure":
             return (.working, p.toolSummary)
         case "PermissionRequest":
+            // Claude asks its questions through a permission request too.
+            if let tool = p.toolName, questionTools.contains(tool) {
+                return (.needsInput, questionText(p) ?? "Asked a question")
+            }
             return (.needsApproval, p.toolSummary)
         case "Notification":
             switch p.notificationType {

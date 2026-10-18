@@ -31,6 +31,14 @@ struct SessionReducerTests {
                     toolInput: input, notificationType: notification, message: message)
     }
 
+    @Test func questionsAskedThroughPermissionRequestStayNeedsInput() {
+        let input: [String: JSONValue] = ["questions": .array([.object(["question": .string("Which color?")])])]
+        let result = replay([payload("PreToolUse", tool: "AskUserQuestion", input: input),
+                             payload("PermissionRequest", tool: "AskUserQuestion", input: input)], source: .claude)
+        #expect(result.statuses == [.needsInput, .needsInput])
+        #expect(result.last?.detail == "Which color?")
+    }
+
     @Test func stallsAfterTenQuietMinutesWhileWorking() {
         let start = Date(timeIntervalSince1970: 1_000_000)
         func env(_ p: HookPayload) -> HookEnvelope { HookEnvelope(source: .claude, context: HookContext(), payload: p) }

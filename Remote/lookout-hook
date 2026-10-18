@@ -202,6 +202,7 @@ def hook(source):
         return
     payload.pop("tool_response", None)
     tool_input = payload.get("tool_input")
+    full_input = json.loads(json.dumps(tool_input)) if isinstance(tool_input, dict) else {}  # an answer goes back with all of it
     if isinstance(tool_input, dict):
         for key, value in list(tool_input.items()):
             if isinstance(value, str) and len(value) > 300:
@@ -236,7 +237,7 @@ def hook(source):
     finally:
         os.close(fd)
     if decision_id:
-        await_decision(decision_id)
+        await_decision(decision_id, full_input)
 
 
 def lookout_connected():
@@ -246,8 +247,8 @@ def lookout_connected():
         return False
 
 
-def await_decision(decision_id):
-    """Waits for Allow or Deny from Lookout, which writes it to ~/.lookout/decisions/<id> over ssh, or "none"
+def await_decision(decision_id, full_input):
+    """Waits for Allow, Deny or answers to Claude's questions from Lookout, which writes it to ~/.lookout/decisions/<id> over ssh, or "none"
     once the request was answered in the terminal (whose dialog stays usable meanwhile). Prints the decision
     for Claude Code as the Mac's hook does (PermissionDecision.swift)."""
     os.makedirs(DECISIONS, mode=0o700, exist_ok=True)
@@ -270,10 +271,22 @@ def await_decision(decision_id):
             os.remove(path)
         except OSError:
             pass
-        if answer in ("allow", "deny"):
-            decision = {"behavior": answer}
-            if answer == "deny":
+        head, _, rest = answer.partition("\n")
+        decision = None
+        if head in ("allow", "deny"):
+            decision = {"behavior": head}
+            if head == "deny":
                 decision["message"] = "Denied from Lookout"
+        elif head == "answer":
+            try:
+                answers = json.loads(rest)
+            except ValueError:
+                answers = None
+            if isinstance(answers, dict) and all(isinstance(v, str) for v in answers.values()):
+                updated = dict(full_input)
+                updated["answers"] = answers
+                decision = {"behavior": "allow", "updatedInput": updated}
+        if decision:
             sys.stdout.write(json.dumps({"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": decision}}))
         return
 

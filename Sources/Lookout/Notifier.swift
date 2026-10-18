@@ -44,8 +44,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         center.setNotificationCategories([UNNotificationCategory(
             identifier: Self.approvalCategory,
             // Only on an unlocked Mac.
-            actions: [UNNotificationAction(identifier: PermissionDecision.allow.rawValue, title: "Allow", options: .authenticationRequired),
-                      UNNotificationAction(identifier: PermissionDecision.deny.rawValue, title: "Deny",
+            actions: [UNNotificationAction(identifier: PermissionDecision.allow.wire, title: "Allow", options: .authenticationRequired),
+                      UNNotificationAction(identifier: PermissionDecision.deny.wire, title: "Deny",
                                            options: [.destructive, .authenticationRequired])],
             intentIdentifiers: [])])
     }
@@ -96,7 +96,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         content.sound = sound
         content.userInfo = ["sessionID": session.id]
         if let request {
-            content.categoryIdentifier = Self.approvalCategory
+            if session.status == .needsApproval { content.categoryIdentifier = Self.approvalCategory } // not for questions
             content.userInfo["request"] = request.uuidString
         }
         // Reusing the session id replaces any earlier notification for the same agent.
@@ -144,7 +144,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             await MainActor.run { NSApp.activate(); AppDelegate.openDashboard?() }
         }
         guard let id = info["sessionID"] as? String else { return }
-        if let decision = PermissionDecision(rawValue: response.actionIdentifier),
+        if let decision = PermissionDecision(wire: response.actionIdentifier),
            let request = (info["request"] as? String).flatMap(UUID.init(uuidString:)) {
             await MainActor.run { onDecide?(id, request, decision) }
         } else if response.actionIdentifier == UNNotificationDefaultActionIdentifier {
