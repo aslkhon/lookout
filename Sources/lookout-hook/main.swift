@@ -13,6 +13,31 @@ import LookoutCore
 signal(SIGPIPE, SIG_IGN)
 
 let source = CommandLine.arguments.dropFirst().first ?? "claude"
+
+// `lookout-hook statusline`: Claude's status line command. Saves the plan limits Claude passes in,
+// then runs the user's own status line command (if any) with the same input and output.
+if source == "statusline" {
+    let input = FileHandle.standardInput.readDataToEndOfFile()
+    if let object = (try? JSONSerialization.jsonObject(with: input)) as? [String: Any] {
+        let limits = UsageLimits.claude(statusLine: object)
+        let url = UsageLimits.claudeFile
+        if !limits.isEmpty, limits != UsageLimits.loadClaude(from: url), let data = try? JSONEncoder().encode(limits) {
+            try? data.write(to: url, options: .atomic)
+        }
+    }
+    guard let original = StatusLineWrapper.originalCommand(at: StatusLineWrapper().originalURL) else { exit(0) }
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/bin/sh")
+    process.arguments = ["-c", original]
+    let stdin = Pipe()
+    process.standardInput = stdin
+    guard (try? process.run()) != nil else { exit(0) }
+    try? stdin.fileHandleForWriting.write(contentsOf: input)
+    try? stdin.fileHandleForWriting.close()
+    process.waitUntilExit()
+    exit(process.terminationStatus)
+}
+
 guard AgentSource(rawValue: source) != nil else { exit(0) }
 
 // Read the payload; drop bulky fields the app doesn't need.

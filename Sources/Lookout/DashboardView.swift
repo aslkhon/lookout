@@ -104,7 +104,7 @@ struct DashboardView: View {
                 ProjectStylePicker(project: project) { editingIcon = nil }
             }
         }
-        .sheet(isPresented: $showsUsage) { UsageView { showsUsage = false } }
+        .sheet(isPresented: $showsUsage) { UsageView(limits: model.limits) { showsUsage = false } }
         .navigationTitle("Lookout")
         .onChange(of: columns) { showsSidebar = columns != .detailOnly }
         .navigationSubtitle(countLabel)

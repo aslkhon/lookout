@@ -10,6 +10,14 @@ final class AppModel: ObservableObject {
 
     @Published private(set) var sessions: [String: AgentSession] = [:]
     @Published var serverError: String?
+    /// Plan limits, from Claude's status line and Codex's session files.
+    @Published private(set) var claudeLimits: [UsageLimit] = []
+    @Published private(set) var codexLimits: [UsageLimit] = []
+    private var codexLimitsRead: Date?
+
+    var limits: [(source: AgentSource, limits: [UsageLimit])] {
+        [(AgentSource.claude, claudeLimits), (.codex, codexLimits)].filter { !$0.1.isEmpty }
+    }
     /// A project for the dashboard to show when it next opens (from a compact-mode card).
     @Published var showProject: String?
 
@@ -153,10 +161,22 @@ final class AppModel: ObservableObject {
         checkStalls()
         KeepAwake.shared.update(working: sessions.values.contains { $0.status == .working && !$0.stalled })
         updateLocalDetails()
+        // Codex's limits only change while it runs, so its files are read again after its events.
+        let readCodex = codexLimitsRead.map { read in
+            sessions.values.contains { $0.source == .codex && $0.host == nil && $0.lastEventAt > read }
+        } ?? true
+        if readCodex { codexLimitsRead = Date() }
         Task.detached(priority: .utility) {
             let found = AgentDiscovery.scan()
-            await MainActor.run { AppModel.shared.merge(found) }
+            let claude = UsageLimits.loadClaude()
+            let codex = readCodex ? UsageLimits.loadCodex() : nil
+            await MainActor.run { AppModel.shared.merge(found); AppModel.shared.setLimits(claude: claude, codex: codex) }
         }
+    }
+
+    private func setLimits(claude: [UsageLimit], codex: [UsageLimit]?) {
+        if claude != claudeLimits { claudeLimits = claude }
+        if let codex, codex != codexLimits { codexLimits = codex }
     }
 
     /// Flags working agents that have gone quiet, and notifies once; their next hook event clears it.

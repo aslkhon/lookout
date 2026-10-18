@@ -3,6 +3,7 @@ import SwiftUI
 
 /// Turns and agent time per project, from the turns Lookout has seen finish.
 struct UsageView: View {
+    var limits: [(source: AgentSource, limits: [UsageLimit])]
     var close: () -> Void
 
     enum Period: String, CaseIterable {
@@ -25,6 +26,10 @@ struct UsageView: View {
     var body: some View {
         let rows = TurnLog.byProject(records.filter { $0.end >= period.start })
         VStack(spacing: 0) {
+            if !limits.isEmpty {
+                LimitsStrip(limits: limits)
+                    .padding(.horizontal, 12).padding(.top, 12)
+            }
             Picker("Period", selection: $period) {
                 ForEach(Period.allCases, id: \.self) { Text($0.rawValue).tag($0) }
             }

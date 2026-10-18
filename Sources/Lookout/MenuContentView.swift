@@ -53,6 +53,11 @@ struct MenuContentView: View {
                 .frame(height: min(listHeight, 520))
                 .onPreferenceChange(HeightKey.self) { listHeight = $0 }
             }
+            if !model.limits.isEmpty {
+                Divider()
+                LimitsStrip(limits: model.limits)
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+            }
             Divider()
             footer
         }

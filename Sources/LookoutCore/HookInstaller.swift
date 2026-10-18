@@ -51,11 +51,16 @@ public struct HookInstaller {
         }
     }
 
-    /// Reinstalls hooks set up by an older version whose PermissionRequest hook timed out after 10 s.
+    var statusLine: StatusLineWrapper { StatusLineWrapper(home: home, hookBinaryPath: hookBinaryPath) }
+
+    /// Reinstalls hooks set up by an older version: one whose PermissionRequest hook timed out
+    /// after 10 s, or a Claude install without the status line wrapper.
     public func upgradeInstalled() {
         for source in AgentSource.allCases where isInstalled(source) {
-            guard let hooks = (try? readJSON(configURL(for: source)))?["hooks"] as? [String: Any],
+            guard let root = try? readJSON(configURL(for: source)),
+                  let hooks = root["hooks"] as? [String: Any],
                   events(for: source).contains("PermissionRequest") else { continue }
+            if source == .claude, !statusLine.isInstalled(in: root) { try? install(source); continue }
             let entries = (hooks["PermissionRequest"] as? [Any] ?? []).flatMap {
                 (($0 as? [String: Any])?["hooks"] as? [Any] ?? []).compactMap { $0 as? [String: Any] }
             }
@@ -77,6 +82,7 @@ public struct HookInstaller {
         let hooks = root["hooks"] as? [String: Any] ?? [:]
         root["hooks"] = Self.addingLookout(to: hooks, events: events(for: source), command: command(for: source),
                                            matcherEvents: source == .claude ? Self.claudeToolEvents : [])
+        if source == .claude { root = try statusLine.installing(into: root) } // for plan limits
         try writeJSON(root, to: url)
     }
 
@@ -84,7 +90,8 @@ public struct HookInstaller {
         let url = configURL(for: source)
         guard FileManager.default.fileExists(atPath: url.path) else { return }
         var root = try readJSON(url)
-        guard let hooks = root["hooks"] as? [String: Any] else { return }
+        if source == .claude { root = statusLine.removing(from: root) }
+        guard let hooks = root["hooks"] as? [String: Any] else { try writeJSON(root, to: url); return }
         let cleaned = Self.removingLookout(from: hooks)
         root["hooks"] = cleaned.isEmpty ? nil : cleaned
         try writeJSON(root, to: url)

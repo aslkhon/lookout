@@ -580,6 +580,14 @@ enum Format {
         return "\(seconds / 86400)d"
     }
 
+    /// Time left until `date`: "12m", "2h 10m", "3d".
+    static func until(_ date: Date, now: Date = Date()) -> String {
+        let s = max(0, Int(date.timeIntervalSince(now)))
+        if s < 3600 { return "\(max(1, s / 60))m" }
+        if s < 86400 { return s % 3600 / 60 == 0 ? "\(s / 3600)h" : "\(s / 3600)h \(s % 3600 / 60)m" }
+        return "\(s / 86400)d"
+    }
+
     /// "45s", "2m 14s", "38m", "1h 5m".
     static func duration(_ interval: TimeInterval) -> String {
         let s = max(0, Int(interval))
@@ -597,5 +605,44 @@ struct Ticking<Content: View>: View {
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: interval)) { context in content(context.date) }
+    }
+}
+
+/// Plan limits per agent: "5h ▰▰▱ 46% · 2h 10m   Week ▰▰▱ 55% · 3d".
+struct LimitsStrip: View {
+    let limits: [(source: AgentSource, limits: [UsageLimit])]
+
+    var body: some View {
+        Ticking(interval: 60) { now in
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(limits, id: \.source) { entry in
+                    HStack(spacing: 10) {
+                        AgentLogo(source: entry.source, size: 12)
+                            .help(entry.source.displayName)
+                        ForEach(entry.limits.map { $0.current(now: now) }, id: \.windowMinutes) { limit in
+                            gauge(limit, now: now)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                }
+            }
+        }
+        .font(.caption)
+    }
+
+    private func gauge(_ limit: UsageLimit, now: Date) -> some View {
+        let used = min(max(limit.usedPercent, 0), 100)
+        let color: Color = used >= 90 ? .red : used >= 70 ? .orange : .green
+        return HStack(spacing: 5) {
+            Text(limit.name).foregroundStyle(.secondary)
+            Capsule().fill(.quaternary)
+                .frame(width: 40, height: 5)
+                .overlay(alignment: .leading) {
+                    Capsule().fill(color).frame(width: 40 * used / 100, height: 5)
+                }
+            Text("\(Int(used.rounded()))%").monospacedDigit()
+            Text("· \(Format.until(limit.resetsAt, now: now))").foregroundStyle(.secondary).monospacedDigit()
+        }
+        .help("\(limit.name) limit: \(Int(used.rounded()))% used, resets \(limit.resetsAt.formatted(date: .abbreviated, time: .shortened))")
     }
 }
