@@ -7,9 +7,14 @@ public struct TokenUsage: Equatable, Sendable {
     public var cacheRead = 0
     public var cacheWrite = 0
     public var output = 0
+    /// Estimated API cost in USD; nil once a model without a known price shows up.
+    public var cost: Double? = 0
+    /// Codex's model, from its `turn_context` lines; its token counts are priced with it.
+    var codexModel: String?
 
-    public init(input: Int = 0, cacheRead: Int = 0, cacheWrite: Int = 0, output: Int = 0) {
+    public init(input: Int = 0, cacheRead: Int = 0, cacheWrite: Int = 0, output: Int = 0, cost: Double? = 0) {
         self.input = input; self.cacheRead = cacheRead; self.cacheWrite = cacheWrite; self.output = output
+        self.cost = cost
     }
 
     public var total: Int { input + cacheRead + cacheWrite + output }
@@ -33,9 +38,10 @@ public struct TokenUsage: Equatable, Sendable {
     /// Takes in one transcript line. Claude: an assistant message's usage, once per message (each content
     /// block's line repeats it, one after another). Codex: `token_count` events carry running totals.
     mutating func add(line: Data, source: AgentSource, lastID: inout String?) {
-        let markers = source == .claude ? Self.claudeMarkers : Self.codexMarkers
-        guard markers.allSatisfy({ line.range(of: $0) != nil }), // most lines have no usage; skip parsing them
-              let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any] else { return }
+        // Most lines have no usage; skip parsing them.
+        let wanted = source == .claude ? Self.claudeMarkers.allSatisfy { line.range(of: $0) != nil }
+            : Self.codexMarkers.contains { line.range(of: $0) != nil }
+        guard wanted, let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any] else { return }
         switch source {
         case .claude:
             guard object["type"] as? String == "assistant",
@@ -44,23 +50,41 @@ public struct TokenUsage: Equatable, Sendable {
             let id = message["id"] as? String
             if id != nil, id == lastID { return }
             lastID = id
-            input += usage["input_tokens"] as? Int ?? 0
-            cacheRead += usage["cache_read_input_tokens"] as? Int ?? 0
-            cacheWrite += usage["cache_creation_input_tokens"] as? Int ?? 0
-            output += usage["output_tokens"] as? Int ?? 0
+            let tokens = Self.claudeTokens(usage)
+            input += tokens.input
+            cacheRead += tokens.cacheRead
+            cacheWrite += tokens.cacheWrite5m + tokens.cacheWrite1h
+            output += tokens.output
+            let model = message["model"] as? String ?? ""
+            if model == "<synthetic>" { return } // Claude Code's own placeholder replies, no API call
+            cost = cost.flatMap { total in Pricing.cost(model: model, tokens).map { total + $0 } }
         case .codex:
-            guard let payload = object["payload"] as? [String: Any], payload["type"] as? String == "token_count",
+            guard let payload = object["payload"] as? [String: Any] else { return }
+            if object["type"] as? String == "turn_context" { codexModel = payload["model"] as? String; return }
+            guard payload["type"] as? String == "token_count",
                   let info = payload["info"] as? [String: Any],
                   let usage = info["total_token_usage"] as? [String: Any] else { return }
             let cached = usage["cached_input_tokens"] as? Int ?? 0
+            let model = codexModel
             self = TokenUsage(input: max(0, (usage["input_tokens"] as? Int ?? 0) - cached), cacheRead: cached,
                               cacheWrite: usage["cache_write_input_tokens"] as? Int ?? 0,
                               output: usage["output_tokens"] as? Int ?? 0)
+            codexModel = model
+            cost = model.flatMap { Pricing.cost(model: $0, ModelTokens(input: input, cacheWrite5m: cacheWrite, cacheRead: cacheRead, output: output)) }
         }
     }
 
+    /// An assistant message's tokens; cache writes without a 5m/1h split count as 5-minute ones.
+    static func claudeTokens(_ usage: [String: Any]) -> ModelTokens {
+        let written = usage["cache_creation_input_tokens"] as? Int ?? 0
+        let split = usage["cache_creation"] as? [String: Any]
+        let hour = min(written, split?["ephemeral_1h_input_tokens"] as? Int ?? 0)
+        return ModelTokens(input: usage["input_tokens"] as? Int ?? 0, cacheWrite5m: written - hour, cacheWrite1h: hour,
+                           cacheRead: usage["cache_read_input_tokens"] as? Int ?? 0, output: usage["output_tokens"] as? Int ?? 0)
+    }
+
     private static let claudeMarkers = [Data(#""type":"assistant""#.utf8), Data(#""usage""#.utf8)]
-    private static let codexMarkers = [Data(#""token_count""#.utf8)]
+    private static let codexMarkers = [Data(#""token_count""#.utf8), Data(#""turn_context""#.utf8)]
 }
 
 /// Running token totals per transcript file; each call reads only what was appended since the last.

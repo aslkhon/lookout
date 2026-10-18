@@ -95,7 +95,20 @@ public enum Transcript {
               let object = try? JSONSerialization.jsonObject(with: Data(line.dropFirst(prefix.count))) as? [String: Any]
         else { return nil }
         let count = { (key: String) in max(0, object[key] as? Int ?? 0) } // the host's output isn't trusted
-        return TokenUsage(input: count("input"), cacheRead: count("cache_read"), cacheWrite: count("cache_write"), output: count("output"))
+        var usage = TokenUsage(input: count("input"), cacheRead: count("cache_read"), cacheWrite: count("cache_write"), output: count("output"))
+        // Per model: [input, 5m cache writes, 1h cache writes, cache reads, output]; "<model>@long" for
+        // Claude Haiku 5.5 requests over 100K tokens. An older hook sends none, so there's no cost.
+        let models = object["models"] as? [String: [Int]] ?? [:]
+        usage.cost = models.isEmpty ? nil : models.reduce(0.0) { total, entry in
+            let n = entry.value.map { max(0, $0) } + [0, 0, 0, 0, 0]
+            let tokens = ModelTokens(input: n[0], cacheWrite5m: n[1], cacheWrite1h: n[2], cacheRead: n[3], output: n[4])
+            let long = entry.key.hasSuffix("@long")
+            let model = long ? String(entry.key.dropLast(5)) : entry.key
+            return total.flatMap { sum in
+                Pricing.price(model: model, promptTokens: long ? 100_001 : 0).map { sum + $0.cost(tokens) }
+            }
+        }
+        return usage
     }
 
     public static func parse(_ lines: [Data], source: AgentSource) -> [TranscriptEntry] {

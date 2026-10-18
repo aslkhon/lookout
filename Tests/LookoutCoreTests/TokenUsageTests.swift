@@ -20,7 +20,7 @@ struct TokenUsageTests {
         let url = try write(claude)
         defer { try? FileManager.default.removeItem(at: url) }
         let usage = await TokenTally().usage(of: url, source: .claude)
-        #expect(usage == TokenUsage(input: 15, cacheRead: 1900, cacheWrite: 90, output: 1550))
+        #expect(usage == TokenUsage(input: 15, cacheRead: 1900, cacheWrite: 90, output: 1550, cost: nil)) // no model in the fixture, so no price
         #expect(usage.summary == "3k tokens · 94% cached · 1k out")
     }
 
@@ -40,7 +40,7 @@ struct TokenUsageTests {
         let huge = #"{"type":"user","message":{"content":""# + String(repeating: "x", count: 3000) + #""}}"#
         let url = try write([claude[0], huge, huge] + claude[1...])
         defer { try? FileManager.default.removeItem(at: url) }
-        #expect(await TokenTally(chunk: 1024).usage(of: url, source: .claude) == TokenUsage(input: 15, cacheRead: 1900, cacheWrite: 90, output: 1550))
+        #expect(await TokenTally(chunk: 1024).usage(of: url, source: .claude) == TokenUsage(input: 15, cacheRead: 1900, cacheWrite: 90, output: 1550, cost: nil))
     }
 
     @Test func codexTakesTheLatestRunningTotal() async throws {
@@ -51,7 +51,7 @@ struct TokenUsageTests {
         ])
         defer { try? FileManager.default.removeItem(at: url) }
         let usage = await TokenTally().usage(of: url, source: .codex)
-        #expect(usage == TokenUsage(input: 501305, cacheRead: 16648960, output: 83613))
+        #expect(usage == TokenUsage(input: 501305, cacheRead: 16648960, output: 83613, cost: nil))
         #expect(usage.summary == "17.2M tokens · 97% cached · 83k out")
     }
 }

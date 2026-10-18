@@ -671,14 +671,16 @@ def transcript(source, session_id, pid, cwd, started, limit=200):
 
 # MARK: Token usage
 
-USAGE_CACHE = os.path.join(ROOT, "usage")
+USAGE_CACHE = os.path.join(ROOT, "usage2")  # "usage" held totals without the per-model split
 
 
 def token_usage(source, path):
-    """Token totals for a transcript, counted as on the Mac (TokenUsage.swift). The totals and the offset
-    read up to are cached in ~/.lookout/usage, so each call reads only what was appended since."""
+    """Token totals for a transcript, counted as on the Mac (TokenUsage.swift), plus per-model totals
+    the Mac prices. The totals and the offset read up to are cached in ~/.lookout/usage2, so each call
+    reads only what was appended since."""
     cache = os.path.join(USAGE_CACHE, hashlib.sha256(path.encode()).hexdigest() + ".json")
-    empty = {"offset": 0, "last_id": None, "usage": {"input": 0, "cache_read": 0, "cache_write": 0, "output": 0}}
+    empty = {"offset": 0, "last_id": None, "model": None,
+             "usage": {"input": 0, "cache_read": 0, "cache_write": 0, "output": 0, "models": {}}}
     try:
         with open(cache) as f:
             state = json.load(f)
@@ -704,17 +706,23 @@ def token_usage(source, path):
 
 def add_usage(source, line, state):
     """Claude: an assistant message's usage, once per message (its content blocks' lines repeat it, one
-    after another). Codex: token_count events carry running totals."""
-    markers = [b'"type":"assistant"', b'"usage"'] if source == "claude" else [b'"token_count"']
-    if not all(m in line for m in markers):
+    after another). Codex: token_count events carry running totals, priced with the turn_context model.
+    Per-model totals are [input, 5m cache writes, 1h cache writes, cache reads, output]; Claude Haiku 5.5
+    requests with prompts over 100K tokens are kept apart as "<model>@long", since they cost more."""
+    if source == "claude":
+        if not (b'"type":"assistant"' in line and b'"usage"' in line):
+            return
+    elif b'"token_count"' not in line and b'"turn_context"' not in line:
         return
     try:
         entry = json.loads(line)
     except ValueError:
         return
+    if not isinstance(entry, dict):
+        return
     num = lambda v: v if isinstance(v, int) and v > 0 else 0
     if source == "claude":
-        message = entry.get("message") if isinstance(entry, dict) else None
+        message = entry.get("message")
         if entry.get("type") != "assistant" or not isinstance(message, dict) or not isinstance(message.get("usage"), dict):
             return
         message_id = message.get("id")
@@ -722,19 +730,40 @@ def add_usage(source, line, state):
             return
         state["last_id"] = message_id
         u, usage = message["usage"], state["usage"]
-        usage["input"] += num(u.get("input_tokens"))
-        usage["cache_read"] += num(u.get("cache_read_input_tokens"))
-        usage["cache_write"] += num(u.get("cache_creation_input_tokens"))
-        usage["output"] += num(u.get("output_tokens"))
+        written = num(u.get("cache_creation_input_tokens"))
+        split = u.get("cache_creation") if isinstance(u.get("cache_creation"), dict) else {}
+        hour = min(written, num(split.get("ephemeral_1h_input_tokens")))
+        tokens = [num(u.get("input_tokens")), written - hour, hour, num(u.get("cache_read_input_tokens")),
+                  num(u.get("output_tokens"))]
+        usage["input"] += tokens[0]
+        usage["cache_read"] += tokens[3]
+        usage["cache_write"] += written
+        usage["output"] += tokens[4]
+        model = message.get("model") if isinstance(message.get("model"), str) else ""
+        if model == "<synthetic>":
+            return
+        if model.startswith("claude-haiku-5-5") and sum(tokens[:4]) > 100000:
+            model += "@long"
+        totals = usage["models"].setdefault(model[:100], [0, 0, 0, 0, 0])
+        for i, n in enumerate(tokens):
+            totals[i] += n
     else:
-        payload = entry.get("payload") if isinstance(entry, dict) else None
-        info = payload.get("info") if isinstance(payload, dict) and payload.get("type") == "token_count" else None
+        payload = entry.get("payload")
+        if not isinstance(payload, dict):
+            return
+        if entry.get("type") == "turn_context":
+            state["model"] = payload.get("model") if isinstance(payload.get("model"), str) else None
+            return
+        info = payload.get("info") if payload.get("type") == "token_count" else None
         u = info.get("total_token_usage") if isinstance(info, dict) else None
         if not isinstance(u, dict):
             return
         cached = num(u.get("cached_input_tokens"))
-        state["usage"] = {"input": max(0, num(u.get("input_tokens")) - cached), "cache_read": cached,
-                          "cache_write": num(u.get("cache_write_input_tokens")), "output": num(u.get("output_tokens"))}
+        usage = {"input": max(0, num(u.get("input_tokens")) - cached), "cache_read": cached,
+                 "cache_write": num(u.get("cache_write_input_tokens")), "output": num(u.get("output_tokens"))}
+        model = state.get("model")
+        usage["models"] = {model[:100]: [usage["input"], usage["cache_write"], 0, cached, usage["output"]]} if model else {}
+        state["usage"] = usage
 
 
 def main():

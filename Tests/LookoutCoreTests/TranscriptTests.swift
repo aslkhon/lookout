@@ -49,7 +49,7 @@ struct TranscriptTests {
 
         let withUsage = output + Data("usage\t{\"input\":5,\"cache_read\":90,\"cache_write\":-3,\"output\":\"x\"}\n".utf8)
         #expect(Transcript.parseRemote(withUsage, source: .claude).count == 3)
-        #expect(Transcript.parseRemoteUsage(withUsage) == TokenUsage(input: 5, cacheRead: 90))
+        #expect(Transcript.parseRemoteUsage(withUsage) == TokenUsage(input: 5, cacheRead: 90, cost: nil))
     }
 
     @Test func loadReadsOnlyTheTail() throws {
