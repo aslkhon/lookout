@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 import LookoutCore
 import UserNotifications
 
@@ -46,8 +46,15 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
 
     /// Quiet hours, or a muted project. The menu bar and windows still show who needs you.
     private func silenced(_ session: AgentSession) -> Bool {
+        muted(session) || quietNow
+    }
+
+    private func muted(_ session: AgentSession) -> Bool {
+        UserDefaults.standard.bool(forKey: ProjectStyle.mutedKey(session.projectName))
+    }
+
+    private var quietNow: Bool {
         let defaults = UserDefaults.standard
-        if defaults.bool(forKey: ProjectStyle.mutedKey(session.projectName)) { return true }
         guard defaults.bool(forKey: Self.quietKey) else { return false }
         let quiet = QuietHours(start: defaults.object(forKey: Self.quietStartKey) as? Int ?? Self.defaultQuietStart,
                                end: defaults.object(forKey: Self.quietEndKey) as? Int ?? Self.defaultQuietEnd)
@@ -80,6 +87,18 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         center.add(UNNotificationRequest(identifier: session.id, content: content, trigger: nil))
     }
 
+    /// "While you were away": one notification for everything that happened, minus muted projects.
+    /// Clicking it opens the dashboard.
+    func postSummary(sessions: [AgentSession], since: Date, away: TimeInterval) {
+        guard !quietNow, let text = AwaySummary.text(for: sessions.filter { !muted($0) }, since: since) else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "While you were away · \(Format.duration(away))"
+        content.body = text
+        content.sound = sound
+        content.userInfo = ["summary": true]
+        center.add(UNNotificationRequest(identifier: "lookout-away", content: content, trigger: nil))
+    }
+
     func isAuthorized() async -> Bool {
         let status = await center.notificationSettings().authorizationStatus
         return status == .authorized || status == .provisional
@@ -104,7 +123,11 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
                                             didReceive response: UNNotificationResponse) async {
-        guard let id = response.notification.request.content.userInfo["sessionID"] as? String else { return }
+        let info = response.notification.request.content.userInfo
+        if info["summary"] != nil {
+            await MainActor.run { NSApp.activate(); AppDelegate.openDashboard?() }
+        }
+        guard let id = info["sessionID"] as? String else { return }
         await MainActor.run { onActivate?(id) }
     }
 }

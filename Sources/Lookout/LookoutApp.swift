@@ -64,6 +64,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         Self.shared = self
         _ = Notifier.shared // become the notification delegate before any click arrives
+        AwayWatcher.shared.start()
         AppModel.shared.start()
         if AppModel.shared.needsSetup {
             showSetup()
