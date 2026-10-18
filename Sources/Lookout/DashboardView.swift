@@ -323,6 +323,9 @@ struct DashboardView: View {
         Group {
             if showsGrid { projectGrid } else { list }
         }
+        // Take the column's width, not the grid's minimum: otherwise widening the inspector pushes
+        // the window's content past its edges, and listWidth never drops to switch to the list.
+        .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
         .safeAreaInset(edge: .top, spacing: 0) {
             if !searchInToolbar {
                 SearchField(text: $query, prompt: "Search")
