@@ -20,10 +20,14 @@ struct LookoutApp: App {
             DashboardView(model: model, remotes: model.remotes, openSetup: { delegate.showSetup() })
                 .frame(minWidth: 380, minHeight: 300) // narrow enough to pin in a corner
                 .onAppear {
+                    AppDelegate.dashboardOpen = true
                     NSApp.setActivationPolicy(.regular) // in the Dock and ⌘-Tab while open
                     AppDelegate.shared?.closeMini() // one or the other, never both
                 }
-                .onDisappear { NSApp.setActivationPolicy(.accessory) }
+                .onDisappear {
+                    AppDelegate.dashboardOpen = false
+                    NSApp.setActivationPolicy(.accessory)
+                }
         }
         .defaultSize(width: 980, height: 600)
     }
@@ -53,6 +57,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// SwiftUI's openWindow for the dashboard, captured from the menu bar label.
     static var openDashboard: (() -> Void)?
     static var closeDashboard: (() -> Void)?
+    /// Dismissing the dashboard when it isn't open made SwiftUI create it at 0×0, off screen,
+    /// where its layout looped forever.
+    static var dashboardOpen = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Self.shared = self
