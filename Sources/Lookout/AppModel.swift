@@ -84,6 +84,7 @@ final class AppModel: ObservableObject {
     }
 
     func handle(_ envelope: HookEnvelope, responder: Responder? = nil) {
+        if SelfTest.shared.claim(envelope.payload.sessionID) { return }
         let key = AgentSession.key(source: envelope.source, sessionID: envelope.payload.sessionID, host: envelope.host)
         hookDriven.insert(key)
         // A Codex agent found by scanning becomes this session once its hooks report in.

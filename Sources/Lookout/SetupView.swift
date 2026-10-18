@@ -9,12 +9,13 @@ struct SetupView: View {
     static let size = CGSize(width: 640, height: 780)
 
     enum Tab: String, CaseIterable {
-        case agents = "Agents", hosts = "Remote Hosts", notifications = "Notifications", general = "General"
+        case agents = "Agents", hosts = "Remote Hosts", notifications = "Notifications", general = "General", selfTest = "Self-Test"
     }
 
     @ObservedObject var model: AppModel
     @ObservedObject var remotes: RemoteHosts
     @ObservedObject private var updater = Updater.shared
+    @ObservedObject private var selfTest = SelfTest.shared
     var close: () -> Void
 
     @State private var busy: Set<String> = []
@@ -68,6 +69,7 @@ struct SetupView: View {
                     case .hosts: RemoteHostsSection(model: model, remotes: remotes)
                     case .notifications: card { notificationRows }
                     case .general: card { generalRows }
+                    case .selfTest: selfTestSection
                     }
                 }
                 .padding(20)
@@ -212,6 +214,45 @@ struct SetupView: View {
             }
         }
         .padding(.horizontal, 14).padding(.vertical, 11)
+    }
+
+    private var selfTestSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Checks each link from your agents to Lookout, including a test event sent through the hook.")
+                    .font(.callout).foregroundStyle(.secondary)
+                Spacer(minLength: 8)
+                if selfTest.running { ProgressView().controlSize(.small) }
+                Button("Copy Report") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(selfTest.report, forType: .string)
+                }
+                .disabled(selfTest.checks.isEmpty)
+                Button("Run Again") { runSelfTest() }.disabled(selfTest.running)
+            }
+            if !selfTest.checks.isEmpty {
+                card {
+                    ForEach(Array(selfTest.checks.enumerated()), id: \.element.id) { i, check in
+                        if i > 0 { Divider() }
+                        SetupRow(state: Self.state(check.level), title: check.title, subtitle: check.detail) { EmptyView() }
+                    }
+                }
+            }
+        }
+        .task { if selfTest.ranAt == nil { runSelfTest() } }
+    }
+
+    private func runSelfTest() {
+        Task { await selfTest.run(model: model, remotes: remotes) }
+    }
+
+    private static func state(_ level: SelfTest.Check.Level) -> SetupRow<EmptyView>.State {
+        switch level {
+        case .ok: .ok
+        case .warning: .warning
+        case .failed: .failed
+        case .info: .unknown
+        }
     }
 
     @ViewBuilder
