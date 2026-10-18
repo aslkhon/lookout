@@ -595,6 +595,78 @@ def transcript(source, session_id, pid, cwd, started, limit=200):
                     found.append((line_offset, slim(source, entry)))
     for line_offset, entry in reversed(found[:limit]):
         sys.stdout.write("%d\t%s\n" % (line_offset, json.dumps(entry)))
+    try:
+        sys.stdout.write("usage\t%s\n" % json.dumps(token_usage(source, path)))
+    except OSError:
+        pass
+
+
+# MARK: Token usage
+
+USAGE_CACHE = os.path.join(ROOT, "usage")
+
+
+def token_usage(source, path):
+    """Token totals for a transcript, counted as on the Mac (TokenUsage.swift). The totals and the offset
+    read up to are cached in ~/.lookout/usage, so each call reads only what was appended since."""
+    cache = os.path.join(USAGE_CACHE, hashlib.sha256(path.encode()).hexdigest() + ".json")
+    empty = {"offset": 0, "last_id": None, "usage": {"input": 0, "cache_read": 0, "cache_write": 0, "output": 0}}
+    try:
+        with open(cache) as f:
+            state = json.load(f)
+    except (OSError, ValueError):
+        state = empty
+    with open(path, "rb") as f:
+        f.seek(0, os.SEEK_END)
+        if not isinstance(state, dict) or not isinstance(state.get("offset"), int) or f.tell() < state["offset"]:
+            state = empty  # unreadable cache, or the file was rewritten
+        f.seek(state["offset"])
+        for line in f:
+            if not line.endswith(b"\n"):
+                break  # still being written
+            state["offset"] += len(line)
+            add_usage(source, line, state)
+    os.makedirs(USAGE_CACHE, mode=0o700, exist_ok=True)
+    tmp = cache + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(state, f)
+    os.replace(tmp, cache)
+    return state["usage"]
+
+
+def add_usage(source, line, state):
+    """Claude: an assistant message's usage, once per message (its content blocks' lines repeat it, one
+    after another). Codex: token_count events carry running totals."""
+    markers = [b'"type":"assistant"', b'"usage"'] if source == "claude" else [b'"token_count"']
+    if not all(m in line for m in markers):
+        return
+    try:
+        entry = json.loads(line)
+    except ValueError:
+        return
+    num = lambda v: v if isinstance(v, int) and v > 0 else 0
+    if source == "claude":
+        message = entry.get("message") if isinstance(entry, dict) else None
+        if entry.get("type") != "assistant" or not isinstance(message, dict) or not isinstance(message.get("usage"), dict):
+            return
+        message_id = message.get("id")
+        if message_id is not None and message_id == state["last_id"]:
+            return
+        state["last_id"] = message_id
+        u, usage = message["usage"], state["usage"]
+        usage["input"] += num(u.get("input_tokens"))
+        usage["cache_read"] += num(u.get("cache_read_input_tokens"))
+        usage["cache_write"] += num(u.get("cache_creation_input_tokens"))
+        usage["output"] += num(u.get("output_tokens"))
+    else:
+        payload = entry.get("payload") if isinstance(entry, dict) else None
+        info = payload.get("info") if isinstance(payload, dict) and payload.get("type") == "token_count" else None
+        u = info.get("total_token_usage") if isinstance(info, dict) else None
+        if not isinstance(u, dict):
+            return
+        cached = num(u.get("cached_input_tokens"))
+        state["usage"] = {"input": max(0, num(u.get("input_tokens")) - cached), "cache_read": cached,
+                          "cache_write": num(u.get("cache_write_input_tokens")), "output": num(u.get("output_tokens"))}
 
 
 def main():

@@ -838,6 +838,8 @@ struct AgentDetailView: View {
     let focus: () -> Void
 
     @State private var copied = false
+    /// Read from the transcript along with the conversation.
+    @State private var usage: TokenUsage?
 
     var body: some View {
         ScrollView {
@@ -853,7 +855,7 @@ struct AgentDetailView: View {
                 }
                 if session.needsYou { waitingBox }
                 block("Details") { details }
-                block("Conversation") { ConversationView(session: session) }
+                block("Conversation") { ConversationView(session: session, usage: $usage) }
             }
             .padding(20)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -942,6 +944,7 @@ struct AgentDetailView: View {
                 }
             }
             row("Last event", session.lastEventAt.formatted(date: .omitted, time: .shortened))
+            row("Tokens", usage.flatMap { $0.total > 0 ? $0.summary : nil })
         }
         .font(.callout)
         .onChange(of: session.id) { copied = false }
@@ -968,6 +971,9 @@ struct AgentDetailView: View {
 /// The latest prompts, replies and tool calls, read from the agent's transcript file on this Mac.
 private struct ConversationView: View {
     let session: AgentSession
+    @Binding var usage: TokenUsage?
+
+    private static let tally = TokenTally()
 
     /// nil until loaded; empty when there's no transcript to read.
     @State private var entries: [TranscriptEntry]?
@@ -1012,7 +1018,7 @@ private struct ConversationView: View {
         let session = session
         if located?.id != session.id {
             entries = nil; showsAll = false; expanded = []
-            located = nil; remoteError = nil
+            located = nil; remoteError = nil; usage = nil
         }
         if let host = session.host { return await reloadRemote(session, host: host) }
         if located?.url == nil { // a new Claude session has no file until its first prompt
@@ -1021,6 +1027,7 @@ private struct ConversationView: View {
         }
         guard let url = located?.url else { entries = []; return }
         entries = await Task.detached { Transcript.load(url, source: session.source, limit: 150) }.value
+        usage = await Self.tally.usage(of: url, source: session.source)
     }
 
     /// Over ssh, through the helper Lookout installed on the host.
@@ -1038,6 +1045,7 @@ private struct ConversationView: View {
             let output = try await RemoteHosts.run(host, command)
             guard !Task.isCancelled else { return }
             entries = Transcript.parseRemote(Data(output.utf8), source: session.source, limit: 150)
+            usage = Transcript.parseRemoteUsage(Data(output.utf8))
             remoteError = nil
         } catch {
             guard !Task.isCancelled else { return }

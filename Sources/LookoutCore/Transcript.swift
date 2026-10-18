@@ -88,6 +88,16 @@ public enum Transcript {
         return Array(found.suffix(limit))
     }
 
+    /// The "usage\t<json>" line `lookout-hook --transcript` ends with, if the host's helper is new enough.
+    public static func parseRemoteUsage(_ output: Data) -> TokenUsage? {
+        let prefix = Data("usage\t".utf8)
+        guard let line = output.split(separator: UInt8(ascii: "\n")).last(where: { $0.starts(with: prefix) }),
+              let object = try? JSONSerialization.jsonObject(with: Data(line.dropFirst(prefix.count))) as? [String: Any]
+        else { return nil }
+        let count = { (key: String) in max(0, object[key] as? Int ?? 0) } // the host's output isn't trusted
+        return TokenUsage(input: count("input"), cacheRead: count("cache_read"), cacheWrite: count("cache_write"), output: count("output"))
+    }
+
     public static func parse(_ lines: [Data], source: AgentSource) -> [TranscriptEntry] {
         lines.flatMap { entries(in: $0, source: source) }
             .enumerated().map { TranscriptEntry(id: $0.offset, kind: $0.element.kind, text: $0.element.text, date: $0.element.date) }

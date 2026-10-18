@@ -45,6 +45,11 @@ struct TranscriptTests {
         #expect(entries.map(\.text) == ["deploy", "Done.", "Bash: ls"])
         #expect(entries.map(\.id) == [120 * 64, 300 * 64, 300 * 64 + 1])
         #expect(Transcript.parseRemote(output, source: .claude, limit: 1).map(\.text) == ["Bash: ls"])
+        #expect(Transcript.parseRemoteUsage(output) == nil) // an older helper
+
+        let withUsage = output + Data("usage\t{\"input\":5,\"cache_read\":90,\"cache_write\":-3,\"output\":\"x\"}\n".utf8)
+        #expect(Transcript.parseRemote(withUsage, source: .claude).count == 3)
+        #expect(Transcript.parseRemoteUsage(withUsage) == TokenUsage(input: 5, cacheRead: 90))
     }
 
     @Test func loadReadsOnlyTheTail() throws {
