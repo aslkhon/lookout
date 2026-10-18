@@ -358,7 +358,6 @@ struct ApprovalButtons: View {
                 .keyboardShortcut("n", enabled: shortcuts)
             Button("Allow") { decide(.allow) }
                 .buttonStyle(.borderedProminent)
-                .tint(.orange)
                 .keyboardShortcut("y", enabled: shortcuts)
             if shortcuts { ShortcutHint(text: "⌘Y · ⌘N") }
         }
@@ -514,7 +513,7 @@ struct QuestionForm: View {
             }
             if !sendsOnClick {
                 Button("Send", action: send)
-                    .buttonStyle(.borderedProminent).tint(.orange)
+                    .buttonStyle(.borderedProminent)
                     .disabled(!complete)
             }
         }
