@@ -237,7 +237,7 @@ def hook(source):
     finally:
         os.close(fd)
     if decision_id:
-        await_decision(decision_id, full_input)
+        await_decision(decision_id, full_input, payload.get("tool_name"))
 
 
 def lookout_connected():
@@ -247,7 +247,7 @@ def lookout_connected():
         return False
 
 
-def await_decision(decision_id, full_input):
+def await_decision(decision_id, full_input, tool_name):
     """Waits for Allow, Deny or answers to Claude's questions from Lookout, which writes it to ~/.lookout/decisions/<id> over ssh, or "none"
     once the request was answered in the terminal (whose dialog stays usable meanwhile). Prints the decision
     for Claude Code as the Mac's hook does (PermissionDecision.swift)."""
@@ -277,7 +277,7 @@ def await_decision(decision_id, full_input):
             decision = {"behavior": head}
             if head == "deny":
                 decision["message"] = "Denied from Lookout"
-        elif head == "answer":
+        elif head == "answer" and tool_name == "AskUserQuestion":  # an answer allows with changed input
             try:
                 answers = json.loads(rest)
             except ValueError:

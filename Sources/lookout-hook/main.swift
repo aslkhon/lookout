@@ -130,7 +130,8 @@ if connected == 0 {
             if n <= 0 { break }
             reply.append(buf, count: n)
         }
-        if let decision = PermissionDecision(wire: String(decoding: reply, as: UTF8.self)) {
+        if let decision = PermissionDecision(wire: String(decoding: reply, as: UTF8.self)),
+           !(decision.isAnswer && payload["tool_name"] as? String != AgentQuestion.tool) { // answers only for questions
             FileHandle.standardOutput.write(decision.hookOutput(toolInput: fullToolInput))
         }
     }

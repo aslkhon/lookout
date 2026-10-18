@@ -92,7 +92,7 @@ final class AppModel: ObservableObject {
         let pending: (any PendingApproval)? = responder
             ?? envelope.host.flatMap { RemoteHosts.Approval(host: $0, id: envelope.context.decisionID) }
         if let pending {
-            let questions = AgentQuestion.parse(envelope.payload.toolInput)
+            let questions = AgentQuestion.parse(envelope.payload.toolInput, tool: envelope.payload.toolName)
             approvals.updateValue((UUID(), pending, questions), forKey: key)?.pending.answer(nil)
         } else if !new.status.needsAttention {
             approvals.removeValue(forKey: key)?.pending.answer(nil)

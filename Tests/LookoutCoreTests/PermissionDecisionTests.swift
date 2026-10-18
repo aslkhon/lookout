@@ -39,11 +39,12 @@ struct PermissionDecisionTests {
             .object(["question": .string("Which toppings?"), "multiSelect": .bool(true)]),
             .object(["header": .string("no question")]),
         ])]
-        #expect(AgentQuestion.parse(input) == [
+        #expect(AgentQuestion.parse(input, tool: "Bash").isEmpty)
+        #expect(AgentQuestion.parse(input, tool: "AskUserQuestion") == [
             AgentQuestion(text: "Which color?", header: "Color",
                           options: [.init(label: "Red", description: "Warm"), .init(label: "Blue", description: nil)], multiSelect: false),
             AgentQuestion(text: "Which toppings?", header: nil, options: [], multiSelect: true),
         ])
-        #expect(AgentQuestion.parse(nil).isEmpty)
+        #expect(AgentQuestion.parse(nil, tool: "AskUserQuestion").isEmpty)
     }
 }

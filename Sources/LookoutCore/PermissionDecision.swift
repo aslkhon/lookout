@@ -7,6 +7,10 @@ public enum PermissionDecision: Sendable, Equatable {
     /// Answers by question text: an option's label (labels joined by ", " for several), or the user's own words.
     case answer([String: String])
 
+    public var isAnswer: Bool {
+        if case .answer = self { true } else { false }
+    }
+
     /// How it travels to the waiting hook: "allow", "deny", or "answer" and a JSON object on the next line.
     public var wire: String {
         switch self {
@@ -63,9 +67,12 @@ public struct AgentQuestion: Equatable, Sendable {
     public var options: [Option]
     public var multiSelect: Bool
 
-    /// The questions in an AskUserQuestion tool input.
-    public static func parse(_ toolInput: [String: JSONValue]?) -> [AgentQuestion] {
-        guard case .array(let items)? = toolInput?["questions"] else { return [] }
+    /// The only tool whose permission request takes answers: an answer allows the call with changed input.
+    public static let tool = "AskUserQuestion"
+
+    /// The questions in an AskUserQuestion tool input; none for any other tool.
+    public static func parse(_ toolInput: [String: JSONValue]?, tool: String?) -> [AgentQuestion] {
+        guard tool == Self.tool, case .array(let items)? = toolInput?["questions"] else { return [] }
         return items.compactMap { item in
             guard case .object(let q) = item, case .string(let text)? = q["question"] else { return nil }
             var options: [Option] = []
