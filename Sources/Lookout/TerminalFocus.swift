@@ -11,6 +11,8 @@ extension Focuser {
 
     /// Focuses the tab on `tty` in the terminal app `bundleID`; false when the app or tab isn't one it can find.
     static func focusTab(bundleID: String, tty: String) -> Bool {
+        // The tty comes from a hook message and goes into AppleScript source.
+        guard tty.range(of: #"^/dev/ttys?[0-9]+$"#, options: .regularExpression) != nil else { return false }
         switch bundleID {
         case itermID: return focusITerm(tty: tty)
         case terminalID: return focusTerminalApp(tty: tty)
