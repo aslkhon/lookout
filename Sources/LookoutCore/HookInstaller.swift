@@ -16,7 +16,11 @@ public struct HookInstaller {
     public static let marker = "lookout-hook"
 
     static let claudeEvents = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse",
-                               "PostToolUseFailure", "PermissionRequest", "Notification", "Stop", "SessionEnd"]
+                               "PostToolUseFailure", "PermissionRequest", "Notification", "Stop", "SessionEnd",
+                               "SubagentStart", "SubagentStop"]
+    /// Events added after the first release: an install without them still counts as installed,
+    /// and `upgradeInstalled` adds them.
+    static let laterEvents: Set<String> = ["SubagentStart", "SubagentStop"]
     static let claudeToolEvents: Set<String> = ["PreToolUse", "PostToolUse", "PostToolUseFailure", "PermissionRequest"]
     static let codexEvents = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse",
                               "PermissionRequest", "Stop", "Interrupt", "SessionEnd"]
@@ -46,21 +50,22 @@ public struct HookInstaller {
         guard let root = try? readJSON(configURL(for: source)),
               let hooks = root["hooks"] as? [String: Any] else { return false }
         let cmd = command(for: source)
-        return events(for: source).allSatisfy { event in
+        return events(for: source).filter { !Self.laterEvents.contains($0) }.allSatisfy { event in
             Self.commands(in: hooks[event]).contains(cmd)
         }
     }
 
     var statusLine: StatusLineWrapper { StatusLineWrapper(home: home, hookBinaryPath: hookBinaryPath) }
 
-    /// Reinstalls hooks set up by an older version: one whose PermissionRequest hook timed out
-    /// after 10 s, or a Claude install without the status line wrapper.
+    /// Reinstalls hooks set up by an older version: one missing a later event, one whose
+    /// PermissionRequest hook timed out after 10 s, or a Claude install without the status line wrapper.
     public func upgradeInstalled() {
         for source in AgentSource.allCases where isInstalled(source) {
             guard let root = try? readJSON(configURL(for: source)),
                   let hooks = root["hooks"] as? [String: Any],
                   events(for: source).contains("PermissionRequest") else { continue }
-            if source == .claude, !statusLine.isInstalled(in: root) { try? install(source); continue }
+            let missing = events(for: source).contains { !Self.commands(in: hooks[$0]).contains(command(for: source)) }
+            if missing || (source == .claude && !statusLine.isInstalled(in: root)) { try? install(source); continue }
             let entries = (hooks["PermissionRequest"] as? [Any] ?? []).flatMap {
                 (($0 as? [String: Any])?["hooks"] as? [Any] ?? []).compactMap { $0 as? [String: Any] }
             }

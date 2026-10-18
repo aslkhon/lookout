@@ -633,6 +633,7 @@ private struct StatusText: View {
             (Text(session.statusLabel)
                 .foregroundColor(selected ? .primary : session.statusColor)
                 .fontWeight(.medium)
+             + Text(session.subagentSuffix).foregroundColor(.secondary)
              + Text(detail.map { " · \($0)" } ?? "")
                 .foregroundColor(session.status.group == .idle ? .secondary : .primary))
                 .lineLimit(1)
@@ -872,6 +873,7 @@ struct AgentDetailView: View {
                     .buttonStyle(.borderedProminent)
                 }
                 if session.needsYou { waitingBox }
+                if !session.subagents.isEmpty { block("Subagents") { subagents } }
                 block("Details") { details }
                 block("Conversation") { ConversationView(session: session, usage: $usage) }
             }
@@ -905,6 +907,28 @@ struct AgentDetailView: View {
                 Text(name).font(.callout).foregroundStyle(.secondary)
             }
         }
+    }
+
+    private var subagents: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(session.subagents) { agent in
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(agent.description ?? agent.type).fontWeight(.medium).lineLimit(1)
+                        if agent.description != nil { Chip(text: agent.type) }
+                        Spacer(minLength: 4)
+                        Ticking { now in
+                            Text(Format.ago(agent.startedAt, now: now)).foregroundStyle(.secondary).monospacedDigit()
+                        }
+                    }
+                    if let tool = agent.tool {
+                        Text([tool.name, tool.argument].compactMap { $0 }.joined(separator: ": "))
+                            .font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
+            }
+        }
+        .font(.callout)
     }
 
     private var waitingBox: some View {

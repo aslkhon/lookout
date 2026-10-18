@@ -31,7 +31,8 @@ WATCHING = os.path.join(ROOT, "watching")  # touched by --watch while Lookout is
 DECISIONS = os.path.join(ROOT, "decisions")
 
 CLAUDE_EVENTS = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse",
-                 "PostToolUseFailure", "PermissionRequest", "Notification", "Stop", "SessionEnd"]
+                 "PostToolUseFailure", "PermissionRequest", "Notification", "Stop", "SessionEnd",
+                 "SubagentStart", "SubagentStop"]
 CLAUDE_TOOL_EVENTS = {"PreToolUse", "PostToolUse", "PostToolUseFailure", "PermissionRequest"}
 CODEX_EVENTS = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse",
                 "PermissionRequest", "Stop", "Interrupt", "SessionEnd"]

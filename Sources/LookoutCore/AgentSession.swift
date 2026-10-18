@@ -26,6 +26,18 @@ public struct ToolCall: Sendable, Equatable {
     public var argument: String?
 }
 
+/// A Claude subagent the session started and that hasn't stopped yet.
+public struct Subagent: Identifiable, Sendable, Equatable {
+    public var id: String
+    /// "Explore", "general-purpose", or a custom agent's name.
+    public var type: String
+    /// The task it was given, from the parent's Agent tool call.
+    public var description: String?
+    public var startedAt: Date
+    /// The tool call it's running.
+    public var tool: ToolCall?
+}
+
 public struct AgentSession: Identifiable, Sendable, Equatable {
     public var id: String { Self.key(source: source, sessionID: sessionID, host: host) }
     public var source: AgentSource
@@ -46,6 +58,10 @@ public struct AgentSession: Identifiable, Sendable, Equatable {
     public var name: String?
     /// The tool call the agent is running or waiting on.
     public var tool: ToolCall?
+    /// Subagents still running; background ones can outlast the parent's turn.
+    public var subagents: [Subagent] = []
+    /// Descriptions of Agent tool calls whose subagent hasn't started yet, oldest first.
+    var pendingSubagentTasks: [String] = []
     public var branch: String?
     /// When the agent process started.
     public var startedAt: Date?
@@ -101,6 +117,9 @@ public enum SessionReducer {
         // Claude Code also submits background-task results as prompts; those aren't the user's.
         if let prompt = p.prompt, !prompt.isEmpty, !prompt.hasPrefix("<task-notification>") { s.lastPrompt = prompt }
 
+        if p.hookEventName == "SessionEnd" { s.subagents = []; s.pendingSubagentTasks = [] }
+        if trackSubagents(p, in: &s, now: now) { return s }
+
         guard let (status, detail) = transition(p, current: existing?.status) else { return s }
         if status != s.status || existing == nil { s.statusSince = now }
         let wasActive = existing.map { $0.status == .working || $0.status.needsAttention } ?? false
@@ -110,6 +129,40 @@ public enum SessionReducer {
         s.detail = detail
         s.tool = toolEvents.contains(p.hookEventName) ? p.toolCall : nil
         return s
+    }
+
+    static let subagentTools: Set<String> = ["Agent", "Task"]
+
+    /// Keeps `subagents` up to date. True for a subagent's own tool events, which leave the parent's
+    /// status alone; its permission requests and notifications still need the user, so they go through.
+    static func trackSubagents(_ p: HookPayload, in s: inout AgentSession, now: Date) -> Bool {
+        switch p.hookEventName {
+        case "PreToolUse" where p.agentID == nil && subagentTools.contains(p.toolName ?? ""):
+            // SubagentStart doesn't say which call started it; they start in the order they're made.
+            var task = ""
+            if case .string(let text)? = p.toolInput?["description"] { task = text }
+            s.pendingSubagentTasks = Array((s.pendingSubagentTasks + [task]).suffix(20))
+        case "SubagentStart":
+            // Claude Code also starts untyped helpers of its own; those aren't the user's subagents.
+            guard let id = p.agentID, let type = p.agentType, !type.isEmpty, !s.subagents.contains(where: { $0.id == id })
+            else { return true }
+            let task = s.pendingSubagentTasks.isEmpty ? nil : s.pendingSubagentTasks.removeFirst()
+            s.subagents = Array((s.subagents + [Subagent(id: id, type: type, description: task?.isEmpty == false ? task : nil,
+                                                         startedAt: now)]).suffix(50))
+            return true
+        case "SubagentStop":
+            s.subagents.removeAll { $0.id == p.agentID }
+            return true
+        case "PreToolUse", "PostToolUse", "PostToolUseFailure":
+            guard let id = p.agentID else { return false }
+            if let i = s.subagents.firstIndex(where: { $0.id == id }) {
+                s.subagents[i].tool = p.hookEventName == "PreToolUse" ? p.toolCall : nil
+            }
+            return true
+        default:
+            break
+        }
+        return false
     }
 
     /// How long a working agent can go without a hook event before it's flagged.

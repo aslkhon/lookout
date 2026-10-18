@@ -31,6 +31,47 @@ struct SessionReducerTests {
                     toolInput: input, notificationType: notification, message: message)
     }
 
+    func sub(_ event: String, _ id: String?, type: String? = nil, tool: String? = nil,
+             input: [String: JSONValue]? = nil) -> HookPayload {
+        HookPayload(sessionID: "s1", hookEventName: event, cwd: "/Users/dev/project", toolName: tool,
+                    toolInput: input, agentID: id, agentType: type)
+    }
+
+    /// The order Claude Code 2.1 sends them in: both Agent calls, then both starts.
+    @Test func subagentsAreTrackedWithoutTakingOverTheParent() throws {
+        let result = replay([
+            payload("UserPromptSubmit"),
+            sub("PreToolUse", nil, tool: "Agent", input: ["description": .string("List files")]),
+            sub("PreToolUse", nil, tool: "Agent", input: ["description": .string("Read a.txt")]),
+            sub("SubagentStart", "a1", type: "Explore"),
+            sub("SubagentStart", "a2", type: "Explore"),
+            sub("SubagentStart", "helper", type: ""), // Claude Code's own
+            payload("Stop"), // background subagents outlast the turn
+            sub("PreToolUse", "a1", type: "Explore", tool: "Bash", input: ["command": .string("ls")]),
+        ], source: .claude)
+        let session = try #require(result.last)
+        #expect(session.status == .finished)
+        #expect(session.subagents.map(\.id) == ["a1", "a2"])
+        #expect(session.subagents.map(\.description) == ["List files", "Read a.txt"])
+        #expect(session.subagents.first?.tool == ToolCall(name: "Bash", argument: "ls"))
+
+        var next = session
+        for p in [sub("SubagentStop", "a1", type: "Explore"), sub("SubagentStop", "helper")] {
+            next = SessionReducer.apply(HookEnvelope(source: .claude, context: HookContext(), payload: p), to: next)
+        }
+        #expect(next.subagents.map(\.id) == ["a2"])
+        next = SessionReducer.apply(HookEnvelope(source: .claude, context: HookContext(), payload: payload("SessionEnd")), to: next)
+        #expect(next.subagents.isEmpty)
+    }
+
+    @Test func aSubagentsPermissionRequestStillNeedsTheUser() {
+        let result = replay([
+            payload("UserPromptSubmit"),
+            sub("PermissionRequest", "a1", type: "Explore", tool: "Bash", input: ["command": .string("rm x")]),
+        ], source: .claude)
+        #expect(result.last?.status == .needsApproval)
+    }
+
     @Test func questionsAskedThroughPermissionRequestStayNeedsInput() {
         let input: [String: JSONValue] = ["questions": .array([.object(["question": .string("Which color?")])])]
         let result = replay([payload("PreToolUse", tool: "AskUserQuestion", input: input),

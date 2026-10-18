@@ -336,6 +336,15 @@ extension AgentSession {
 
     var needsYou: Bool { status.needsAttention }
 
+    /// " · 2 subagents", or nothing.
+    var subagentSuffix: String {
+        switch subagents.count {
+        case 0: ""
+        case 1: " · 1 subagent"
+        case let n: " · \(n) subagents"
+        }
+    }
+
     /// Whether `query` matches this agent's project, prompt, name or command.
     func matches(_ query: String) -> Bool {
         let q = query.trimmingCharacters(in: .whitespaces)

@@ -79,6 +79,9 @@ public struct HookPayload: Codable, Sendable {
     public var message: String?
     public var prompt: String?
     public var lastAssistantMessage: String?
+    /// Set on events from inside a Claude subagent, and on SubagentStart/SubagentStop.
+    public var agentID: String?
+    public var agentType: String?
 
     enum CodingKeys: String, CodingKey {
         case sessionID = "session_id"
@@ -90,11 +93,14 @@ public struct HookPayload: Codable, Sendable {
         case message
         case prompt
         case lastAssistantMessage = "last_assistant_message"
+        case agentID = "agent_id"
+        case agentType = "agent_type"
     }
 
     public init(sessionID: String, hookEventName: String, cwd: String? = nil, toolName: String? = nil,
                 toolInput: [String: JSONValue]? = nil, notificationType: String? = nil,
-                message: String? = nil, prompt: String? = nil, lastAssistantMessage: String? = nil) {
+                message: String? = nil, prompt: String? = nil, lastAssistantMessage: String? = nil,
+                agentID: String? = nil, agentType: String? = nil) {
         self.sessionID = sessionID
         self.hookEventName = hookEventName
         self.cwd = cwd
@@ -104,6 +110,8 @@ public struct HookPayload: Codable, Sendable {
         self.message = message
         self.prompt = prompt
         self.lastAssistantMessage = lastAssistantMessage
+        self.agentID = agentID
+        self.agentType = agentType
     }
 
     /// Short human description of the tool call, e.g. "Bash: npm test".
