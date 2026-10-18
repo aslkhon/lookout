@@ -1,12 +1,14 @@
 import Foundation
 
-/// The Markdown in Claude's plans, split into blocks for display: headings, list items, code and paragraphs.
+/// The Markdown in Claude's plans, split into blocks for display: headings, list items, code, tables and paragraphs.
 /// Inline styling (bold, code spans, links) is left to `AttributedString(markdown:)`.
 public enum MarkdownBlock: Equatable, Sendable {
     case heading(level: Int, text: String)
     case item(marker: String, indent: Int, text: String)
     case code(String)
     case paragraph(String)
+    /// Rows of cells; the first is the header. The `|---|` separator row is dropped.
+    case table([[String]])
     case rule
 }
 
@@ -15,10 +17,13 @@ extension MarkdownBlock {
         var blocks: [MarkdownBlock] = []
         var paragraph: [String] = []
         var code: [String]?
+        var table: [[String]] = []
 
         func flush() {
             if !paragraph.isEmpty { blocks.append(.paragraph(paragraph.joined(separator: " "))) }
             paragraph = []
+            if !table.isEmpty { blocks.append(.table(table)) }
+            table = []
         }
 
         for raw in markdown.components(separatedBy: "\n") {
@@ -35,6 +40,15 @@ extension MarkdownBlock {
             }
             if code != nil { code?.append(raw); continue }
             if line.isEmpty { flush(); continue }
+            if line.hasPrefix("|") {
+                if table.isEmpty { flush() }
+                let cells = line.split(separator: "|", omittingEmptySubsequences: false).dropFirst()
+                    .map { $0.trimmingCharacters(in: .whitespaces) }
+                let row = Array(line.hasSuffix("|") ? cells.dropLast() : cells[...])
+                if !row.allSatisfy({ !$0.isEmpty && $0.allSatisfy { "-:".contains($0) } }) { table.append(row) }
+                continue
+            }
+            if !table.isEmpty { flush() }
             let hashes = line.prefix { $0 == "#" }.count
             if (1...6).contains(hashes), line.dropFirst(hashes).first == " " {
                 flush()

@@ -394,13 +394,14 @@ struct PlanReviewBox: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            ScrollView {
-                MarkdownText(markdown: plan)
-                    .padding(10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            Group {
+                // A nested ScrollView sized to fit would take the plan's unwrapped width.
+                if let maxHeight {
+                    ScrollView { planText }.frame(maxHeight: maxHeight)
+                } else {
+                    planText
+                }
             }
-            .frame(maxHeight: maxHeight)
-            .fixedSize(horizontal: false, vertical: maxHeight == nil)
             .background(.background.opacity(0.6), in: RoundedRectangle(cornerRadius: 6))
             TextField("Tell Claude what to change", text: $feedback, axis: .vertical)
                 .lineLimit(1...4)
@@ -408,12 +409,19 @@ struct PlanReviewBox: View {
                 .onSubmit(send)
             HStack(spacing: 8) {
                 Button("Send Feedback", action: send)
+                    .buttonStyle(.borderedProminent)
                     .disabled(trimmed.isEmpty)
                 Button("Approve in Terminal", action: approveInTerminal)
-                    .buttonStyle(.borderedProminent).tint(.orange)
+                    .buttonStyle(.bordered)
             }
         }
         .controlSize(.small)
+    }
+
+    private var planText: some View {
+        MarkdownText(markdown: plan)
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var trimmed: String { feedback.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -448,6 +456,18 @@ struct MarkdownText: View {
                         .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 4))
                 case .paragraph(let text):
                     inline(text)
+                case .table(let rows):
+                    Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 4) {
+                        ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+                            GridRow {
+                                ForEach(Array(row.enumerated()), id: \.offset) { _, cell in
+                                    inline(cell).fontWeight(index == 0 ? .semibold : nil)
+                                }
+                            }
+                            if index == 0 && rows.count > 1 { Divider() }
+                        }
+                    }
+                    .padding(.vertical, 2)
                 case .rule:
                     Divider()
                 }

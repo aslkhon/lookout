@@ -43,4 +43,19 @@ struct MarkdownBlockTests {
     @Test func unclosedFenceKeepsItsCode() {
         #expect(MarkdownBlock.parse("text\n```\ncode") == [.paragraph("text"), .code("code")])
     }
+
+    @Test func tables() {
+        let blocks = MarkdownBlock.parse("""
+        Intro
+        | Block | Expected |
+        |---|:--|
+        | Heading | Larger, `bold` |
+        After
+        """)
+        #expect(blocks == [
+            .paragraph("Intro"),
+            .table([["Block", "Expected"], ["Heading", "Larger, `bold`"]]),
+            .paragraph("After"),
+        ])
+    }
 }
