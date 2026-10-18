@@ -113,6 +113,7 @@ struct StatusIcon: View {
     var body: some View {
         Group {
             switch session.status {
+            case .working where session.stalled: Image(systemName: "hourglass").foregroundStyle(.yellow)
             case .working: spinner
             case .needsApproval, .needsInput:
                 Pulsing(pulsing: !reduceMotion, range: 0.4...1) {
@@ -127,7 +128,7 @@ struct StatusIcon: View {
         }
         .font(.system(size: size - 1))
         .frame(width: size, height: size)
-        .help(session.status.label)
+        .help(session.statusLabel)
     }
 
     private var spinner: some View {
@@ -321,6 +322,10 @@ extension AgentSession {
             return termProgram == "vscode" ? "VS Code" : nil
         }
     }
+
+    /// The status, or "No activity" for a working agent that has gone quiet.
+    var statusLabel: String { stalled ? "No activity" : status.label }
+    var statusColor: Color { stalled ? .yellow : status.color }
 
     /// "Needs approval · Bash: npm test"-style text after the status label.
     var statusDetail: String? {

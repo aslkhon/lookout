@@ -285,7 +285,7 @@ struct MenuAgentRow: View {
     }
 
     private var statusLine: some View {
-        let label = Text(session.status.label).foregroundColor(session.status.color).fontWeight(.medium)
+        let label = Text(session.statusLabel).foregroundColor(session.statusColor).fontWeight(.medium)
         return Group {
             if session.status == .working, let tool = session.tool, let argument = tool.argument {
                 label + Text(" · \(tool.name) ").foregroundColor(.primary.opacity(0.85))

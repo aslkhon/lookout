@@ -618,8 +618,8 @@ private struct StatusText: View {
                      session.status == .finished ? session.lastTurnDuration.map { "took \(Format.duration($0))" } : nil]
             .compactMap { $0 }.joined(separator: " · ")
         VStack(alignment: .leading, spacing: 2) {
-            (Text(session.status.label)
-                .foregroundColor(selected ? .primary : session.status.color)
+            (Text(session.statusLabel)
+                .foregroundColor(selected ? .primary : session.statusColor)
                 .fontWeight(.medium)
              + Text(detail.map { " · \($0)" } ?? "")
                 .foregroundColor(session.status.group == .idle ? .secondary : .primary))

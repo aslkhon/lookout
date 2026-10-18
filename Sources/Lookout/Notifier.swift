@@ -64,6 +64,9 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         case .needsInput:
             content.title = "\(session.projectName) has a question"
             content.body = session.detail ?? "Waiting for your input"
+        case .working where session.stalled:
+            content.title = "\(session.projectName) has gone quiet"
+            content.body = "No activity for \(Int(SessionReducer.stallAfter / 60)) minutes" + (session.detail.map { " · \($0)" } ?? "")
         case .finished:
             content.title = "\(session.projectName) finished"
             content.body = session.detail ?? session.lastPrompt ?? "Turn complete"

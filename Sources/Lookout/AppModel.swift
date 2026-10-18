@@ -111,10 +111,20 @@ final class AppModel: ObservableObject {
 
     private func refresh() {
         checkLiveness()
+        checkStalls()
         updateLocalDetails()
         Task.detached(priority: .utility) {
             let found = AgentDiscovery.scan()
             await MainActor.run { AppModel.shared.merge(found) }
+        }
+    }
+
+    /// Flags working agents that have gone quiet, and notifies once; their next hook event clears it.
+    /// Only hook-driven ones: for agents found by scanning, `lastEventAt` is just when they were found.
+    private func checkStalls() {
+        for (key, session) in sessions where hookDriven.contains(key) && !session.stalled && SessionReducer.isStalled(session) {
+            sessions[key]?.stalled = true
+            sessions[key].map(Notifier.shared.post)
         }
     }
 

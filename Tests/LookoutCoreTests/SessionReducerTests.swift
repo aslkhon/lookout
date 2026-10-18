@@ -31,6 +31,20 @@ struct SessionReducerTests {
                     toolInput: input, notificationType: notification, message: message)
     }
 
+    @Test func stallsAfterTenQuietMinutesWhileWorking() {
+        let start = Date(timeIntervalSince1970: 1_000_000)
+        func env(_ p: HookPayload) -> HookEnvelope { HookEnvelope(source: .claude, context: HookContext(), payload: p) }
+        var s = SessionReducer.apply(env(payload("PreToolUse", tool: "Bash", input: ["command": .string("npm test")])), to: nil, now: start)
+        #expect(!SessionReducer.isStalled(s, now: start + 9 * 60))
+        #expect(SessionReducer.isStalled(s, now: start + 10 * 60))
+        s.stalled = true
+        s = SessionReducer.apply(env(payload("PostToolUse", tool: "Bash")), to: s, now: start + 11 * 60)
+        #expect(!s.stalled) // any event clears it
+        #expect(!SessionReducer.isStalled(s, now: start + 12 * 60))
+        s = SessionReducer.apply(env(payload("Stop")), to: s, now: start + 12 * 60)
+        #expect(!SessionReducer.isStalled(s, now: start + 60 * 60)) // only working agents stall
+    }
+
     @Test(arguments: [("claude-turn", AgentSource.claude), ("codex-turn", .codex)])
     func recordedTurn(name: String, source: AgentSource) throws {
         let result = replay(try fixture(name), source: source)

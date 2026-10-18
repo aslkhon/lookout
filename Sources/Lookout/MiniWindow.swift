@@ -124,7 +124,7 @@ private struct MiniRow: View {
             AgentLogo(source: session.source, size: 14)
             VStack(alignment: .leading, spacing: 0) {
                 Text(title).font(.system(size: 12.5, weight: .semibold)).lineLimit(1)
-                (Text(session.status.label).foregroundColor(session.status.color)
+                (Text(session.statusLabel).foregroundColor(session.statusColor)
                  + Text(session.detail.map { " · \($0)" } ?? "").foregroundColor(.secondary))
                     .font(.system(size: 12))
                     .lineLimit(1)

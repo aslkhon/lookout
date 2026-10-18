@@ -36,6 +36,8 @@ public struct AgentSession: Identifiable, Sendable, Equatable {
     public var status: AgentStatus
     public var statusSince: Date
     public var lastEventAt: Date
+    /// Working, but no hook event for `SessionReducer.stallAfter`: a hung command, or just a long one.
+    public var stalled = false
     /// What the agent is waiting on or last said, e.g. "Bash: npm test".
     public var detail: String?
     /// The last prompt the user submitted, as a title for the session.
@@ -95,6 +97,7 @@ public enum SessionReducer {
         s.branch = ctx.branch ?? s.branch
         s.startedAt = ctx.startedAt.map { Date(timeIntervalSince1970: $0) } ?? s.startedAt
         s.lastEventAt = now
+        s.stalled = false
         // Claude Code also submits background-task results as prompts; those aren't the user's.
         if let prompt = p.prompt, !prompt.isEmpty, !prompt.hasPrefix("<task-notification>") { s.lastPrompt = prompt }
 
@@ -107,6 +110,13 @@ public enum SessionReducer {
         s.detail = detail
         s.tool = toolEvents.contains(p.hookEventName) ? p.toolCall : nil
         return s
+    }
+
+    /// How long a working agent can go without a hook event before it's flagged.
+    public static let stallAfter: TimeInterval = 10 * 60
+
+    public static func isStalled(_ s: AgentSession, now: Date = Date()) -> Bool {
+        s.status == .working && now.timeIntervalSince(s.lastEventAt) >= stallAfter
     }
 
     static let toolEvents: Set<String> = ["PreToolUse", "PostToolUse", "PostToolUseFailure", "PermissionRequest"]
