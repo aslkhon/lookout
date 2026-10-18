@@ -22,6 +22,12 @@
 	<string>14.0</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUFeedURL</key>
+	<string>https://github.com/aslkhon/lookout/releases/latest/download/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>PIFHMsBZGD9fVZ+vwrBsTT5JnY+Ci5UNJ9Hk+8+Disg=</string>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>Lookout uses Automation to focus the terminal tab running your agent.</string>
 </dict>

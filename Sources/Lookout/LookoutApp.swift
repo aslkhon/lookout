@@ -67,6 +67,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AwayWatcher.shared.start()
         GlobalShortcut.shared.update()
         AppModel.shared.start()
+        _ = Updater.shared
         if AppModel.shared.needsSetup {
             showSetup()
         } else {

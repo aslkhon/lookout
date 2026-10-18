@@ -14,6 +14,7 @@ struct SetupView: View {
 
     @ObservedObject var model: AppModel
     @ObservedObject var remotes: RemoteHosts
+    @ObservedObject private var updater = Updater.shared
     var close: () -> Void
 
     @State private var busy: Set<String> = []
@@ -38,6 +39,10 @@ struct SetupView: View {
 
     private func present(_ source: AgentSource) -> Bool {
         FileManager.default.fileExists(atPath: LookoutPaths.home.appendingPathComponent(source == .claude ? ".claude" : ".codex").path)
+    }
+
+    static var version: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
     }
 
     private var firstRun: Bool { _ = revision; return model.needsSetup }
@@ -220,6 +225,14 @@ struct SetupView: View {
                  subtitle: "From any app. In the panel, ⌘Y and ⌘N answer the first request, ⌘1–⌘9 pick an option.") {
             Toggle("", isOn: $globalShortcut).toggleStyle(.switch).controlSize(.small).labelsHidden()
                 .onChange(of: globalShortcut) { GlobalShortcut.shared.update() }
+        }
+        Divider()
+        SetupRow(state: nil, title: "Updates",
+                 subtitle: "Version \(Self.version). Checks GitHub once a day and asks before installing.") {
+            Toggle("", isOn: Binding(get: { updater.checksAutomatically }, set: { updater.checksAutomatically = $0 }))
+                .toggleStyle(.switch).controlSize(.small).labelsHidden()
+                .help("Check for updates automatically")
+            Button("Check Now") { updater.check() }.disabled(!updater.canCheck)
         }
         Divider()
         SetupRow(state: nil, title: "Launch at login",
