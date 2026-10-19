@@ -665,9 +665,7 @@ private struct StatusRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            StatusIcon(session: session)
-            AgentLogo(source: session.source, size: 16)
-                .help(session.source.displayName)
+            StatusIcon(session: session, size: 16)
             let title = HStack(spacing: 5) {
                 Text(session.projectName).fontWeight(.semibold).lineLimit(1)
                 if let branch = session.branch {
@@ -706,9 +704,7 @@ private struct ProjectRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            StatusIcon(session: session)
-            AgentLogo(source: session.source, size: 16)
-                .help(session.source.displayName)
+            StatusIcon(session: session, size: 16)
             if compact {
                 VStack(alignment: .leading, spacing: 2) {
                     ViewThatFits(in: .horizontal) { // the chip goes first when space runs out

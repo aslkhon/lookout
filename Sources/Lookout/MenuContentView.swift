@@ -281,9 +281,8 @@ struct MenuAgentRow: View {
     private var row: some View {
         Button(action: action) {
             HStack(alignment: .top, spacing: 10) {
-                StatusDot(status: session.status, size: session.needsYou ? 10 : 8)
-                    .frame(width: 12, height: 12)
-                    .padding(.top, 3)
+                StatusIcon(session: session, size: 16)
+                    .padding(.top, 1)
                 VStack(alignment: .leading, spacing: 4) {
                     titleLine
                     statusLine

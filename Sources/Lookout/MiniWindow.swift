@@ -122,8 +122,7 @@ private struct MiniRow: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            StatusIcon(session: session, size: 15)
-            AgentLogo(source: session.source, size: 14)
+            StatusIcon(session: session, size: 16)
             VStack(alignment: .leading, spacing: 0) {
                 Text(title).font(.system(size: 12.5, weight: .semibold)).lineLimit(1)
                 (Text(session.statusLabel).foregroundColor(session.statusColor)
