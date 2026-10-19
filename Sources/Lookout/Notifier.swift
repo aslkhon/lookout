@@ -154,7 +154,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         // The notch shows it instead of a banner, with the same sound.
         if ViewModes.shared.mode == .notch, let notch = AppDelegate.shared?.notchPanel {
             play(soundName(for: session))
-            notch.peek()
+            notch.show(session)
             alertPhone(session, title: content.title, body: "\(content.subtitle): \(content.body)")
             return
         }

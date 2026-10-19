@@ -79,6 +79,7 @@ struct ViewSwitcher: View {
     var willSwitch: () -> Void = {}
 
     var body: some View {
+        // Neutral, like the rest of the chrome: the current view is a slightly lighter tile, no accent.
         HStack(spacing: 2) {
             ForEach(ViewMode.allCases, id: \.self) { mode in
                 let current = mode == views.mode
@@ -89,9 +90,8 @@ struct ViewSwitcher: View {
                     Image(systemName: mode.icon)
                         .font(.system(size: size))
                         .frame(width: size * 2, height: size * 1.7)
-                        .foregroundStyle(current ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
-                        .background(current ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.clear),
-                                    in: RoundedRectangle(cornerRadius: 5))
+                        .foregroundStyle(current ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
+                        .background(current ? Color.primary.opacity(0.14) : .clear, in: RoundedRectangle(cornerRadius: 5))
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -99,6 +99,8 @@ struct ViewSwitcher: View {
                 .modifier(MiniShortcut(enabled: mode == .mini))
             }
         }
+        .padding(2)
+        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 7))
     }
 }
 

@@ -309,7 +309,6 @@ struct MenuAgentRow: View {
             if let branch = session.branch {
                 Text("/ \(branch)").foregroundStyle(.secondary).lineLimit(1)
             }
-            SourceChip(source: session.source)
             if let host = session.host {
                 Chip(text: host, style: .remote, systemImage: "globe")
             } else if let app = session.appName {

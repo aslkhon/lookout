@@ -9,6 +9,9 @@ import SwiftUI
 @MainActor
 final class NotchState: ObservableObject {
     @Published var expanded = false
+    /// Folded but showing this one agent, which just needed you or finished; hover opens the rest.
+    @Published private(set) var alert: String?
+    private var alertTask: Task<Void, Never>?
     /// You opened it (hover or ⌥⇧L) rather than it peeking on its own. Only then do ⌘Y and ⌘N
     /// answer, so a keystroke meant for another app can't approve something you haven't seen.
     @Published private(set) var openedByYou = false
@@ -36,12 +39,36 @@ final class NotchState: ObservableObject {
         if row != hoveredRow { hoveredRow = row }
     }
 
+    /// Folded and forgotten, for when the panel goes away: hidden, it no longer follows the mouse.
+    func reset() {
+        task?.cancel()
+        alertTask?.cancel()
+        alert = nil
+        hovering = false
+        openedByYou = false
+        expanded = false
+        hoveredRow = nil
+    }
+
     /// Unfolds for a few seconds to show what changed, or because you pressed ⌥⇧L.
     func peek(byYou: Bool = false) {
         task?.cancel()
+        alert = nil
         expanded = true
         openedByYou = byYou || hovering // a peek you didn't ask for disarms, unless you're on it
         change(to: false, after: .seconds(4))
+    }
+
+    /// Shows one agent for a few seconds, unless the whole notch is already open.
+    func show(_ sessionID: String) {
+        guard !expanded else { return }
+        alert = sessionID
+        alertTask?.cancel()
+        alertTask = Task {
+            try? await Task.sleep(for: .seconds(4))
+            guard !Task.isCancelled else { return }
+            alert = nil
+        }
     }
 
     private func change(to open: Bool, after delay: Duration, byYou: Bool = false) {
@@ -50,6 +77,7 @@ final class NotchState: ObservableObject {
             try? await Task.sleep(for: delay)
             guard !Task.isCancelled, open || !hovering else { return }
             expanded = open
+            if open { alert = nil }
             if !open { openedByYou = false } else if byYou { openedByYou = true }
         }
     }
@@ -62,6 +90,7 @@ struct NotchView: View {
 
     private static let ear: CGFloat = 34
     private static let width: CGFloat = 640
+    private static let alertWidth: CGFloat = 460
     /// Rows shown before "N more".
     private static let maxRows = 8
 
@@ -74,8 +103,8 @@ struct NotchView: View {
         let target = live.filter(answerable).min { $0.statusSince < $1.statusSince }
         // An orange glow while ⌘Y and ⌘N go to Lookout rather than the app in front.
         let armed = state.expanded && state.openedByYou && target != nil
-        let shape = UnevenRoundedRectangle(bottomLeadingRadius: state.expanded ? 22 : 9,
-                                           bottomTrailingRadius: state.expanded ? 22 : 9)
+        let radius: CGFloat = state.expanded ? 22 : state.alert != nil ? 18 : 9
+        let shape = UnevenRoundedRectangle(bottomLeadingRadius: radius, bottomTrailingRadius: radius)
         VStack(spacing: 0) {
             if state.expanded {
                 Group {
@@ -83,12 +112,19 @@ struct NotchView: View {
                     list(live, target: armed ? target?.id : nil)
                 }
                 .transition(.opacity)
+            } else if let alert = state.alert.flatMap({ model.sessions[$0] }) {
+                VStack(spacing: 0) {
+                    Spacer().frame(height: state.notch.height)
+                    NotchRow(session: alert).padding(.horizontal, 16).padding(.top, 2).padding(.bottom, 8)
+                }
+                .transition(.opacity)
             } else {
                 ears(live, attention: attention)
                     .transition(.opacity)
             }
         }
-        .frame(width: state.expanded ? Self.width : state.notch.width + 2 * Self.ear, alignment: .top)
+        .frame(width: state.expanded ? Self.width : state.alert != nil ? Self.alertWidth : state.notch.width + 2 * Self.ear,
+               alignment: .top)
         .background(.black)
         // While it grows, the content stays inside the shape.
         .clipShape(shape)
@@ -101,12 +137,17 @@ struct NotchView: View {
         .contextMenu { AppCommands() }
         .environment(\.colorScheme, .dark)
         .animation(.spring(response: 0.35, dampingFraction: 0.82), value: state.expanded)
+        .animation(.spring(response: 0.35, dampingFraction: 0.82), value: state.alert)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .onChange(of: attention) { old, new in
-            if new > old { state.peek() }
+            // The newest to need you; the notifier shows the same one, so this only matters when it's silenced.
+            if new > old, let newest = live.filter({ $0.status.needsAttention }).max(by: { $0.statusSince < $1.statusSince }) {
+                state.show(newest.id)
+            }
         }
-        .onChange(of: armed ? target?.id : nil, initial: true) { _, id in
-            GlobalShortcut.shared.answer = id.flatMap { model.sessions[$0] }.flatMap(model.decider)
+        // By request, not by agent: one that replaces another re-arms, rather than ⌘Y answering the old one.
+        .onChange(of: armed ? target.flatMap(model.requestID) : nil, initial: true) { _, request in
+            GlobalShortcut.shared.answer = request == nil ? nil : target.flatMap(model.decider)
         }
         .onDisappear { GlobalShortcut.shared.answer = nil }
     }
@@ -228,10 +269,10 @@ private struct NotchRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            StatusIcon(session: session, size: 18).frame(width: 22).padding(.top, 1)
+            StatusIcon(session: session, size: 30).frame(width: 32).padding(.top, 2)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.system(size: 13, weight: .semibold)).lineLimit(1)
-                activity.font(.system(size: 12)).lineLimit(2)
+                activity.font(.system(size: 12)).lineLimit(1) // one line, so every row is as tall
                 if let decide {
                     HStack(spacing: 8) {
                         Button("Deny") { decide(.deny) }
@@ -260,7 +301,6 @@ private struct NotchRow: View {
 
     private var tags: some View {
         HStack(spacing: 5) {
-            tag(session.source.displayName, color: session.source == .claude ? .orange : .secondary)
             if let app = session.appName { tag(app, color: .secondary) }
             Ticking { now in tag(Format.ago(session.statusSince, now: now), color: .secondary) }
         }
@@ -344,6 +384,15 @@ final class NotchPanel: NSPanel {
     }
 
     func peek(byYou: Bool = false) { state.peek(byYou: byYou) }
+
+    /// One agent, folded: for an alert.
+    func show(_ session: AgentSession) { state.show(session.id) }
+
+    override func orderOut(_ sender: Any?) {
+        super.orderOut(sender)
+        state.reset()
+        GlobalShortcut.shared.answer = nil // now, not when the hidden view next updates
+    }
 
     /// The built-in screen if it has a notch, else the menu bar's screen.
     private var notchScreen: NSScreen? {

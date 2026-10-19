@@ -128,6 +128,9 @@ final class AppModel: ObservableObject {
         return { [weak self] in self?.decide(session.id, request: request, $0) }
     }
 
+    /// The request Lookout holds for this agent, which a newer one replaces.
+    func requestID(for session: AgentSession) -> UUID? { approvals[session.id]?.request }
+
     /// The questions in this agent's held request, if it's asking some.
     func questions(for session: AgentSession) -> [AgentQuestion] { approvals[session.id]?.questions ?? [] }
 
