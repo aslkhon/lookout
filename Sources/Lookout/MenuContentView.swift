@@ -95,7 +95,8 @@ struct MenuContentView: View {
     @ViewBuilder
     private var list: some View {
         let groups = Dictionary(grouping: sessions, by: \.status.group)
-        let first = groups[.needsYou]?.first { model.decider(for: $0) != nil }?.id // gets the shortcuts
+        // The oldest request gets the shortcuts, so one arriving while you read can't take ⌘Y from it.
+        let first = groups[.needsYou]?.filter { model.decider(for: $0) != nil }.min { $0.statusSince < $1.statusSince }?.id
         VStack(alignment: .leading, spacing: 4) {
             ForEach([AgentStatus.Group.needsYou, .working, .finished], id: \.self) { group in
                 if let members = groups[group], !members.isEmpty {

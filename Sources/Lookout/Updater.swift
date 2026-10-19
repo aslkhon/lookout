@@ -4,7 +4,7 @@ import Sparkle
 /// Updates through Sparkle. The feed is appcast.xml on the latest GitHub release, and each
 /// update is checked against the EdDSA key in Info.plist, so ad-hoc signing is enough.
 @MainActor
-final class Updater: NSObject, ObservableObject, SPUStandardUserDriverDelegate {
+final class Updater: NSObject, ObservableObject {
     static let shared = Updater()
 
     private var controller: SPUStandardUpdaterController!
@@ -12,7 +12,7 @@ final class Updater: NSObject, ObservableObject, SPUStandardUserDriverDelegate {
 
     override init() {
         super.init()
-        controller = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: self)
+        controller = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
         controller.updater.publisher(for: \.canCheckForUpdates).assign(to: &$canCheck)
     }
 
@@ -25,7 +25,4 @@ final class Updater: NSObject, ObservableObject, SPUStandardUserDriverDelegate {
         NSApp.activate()
         controller.checkForUpdates(nil)
     }
-
-    // A menu bar app: a scheduled check shows its update without stealing focus.
-    nonisolated var supportsGentleScheduledUpdateReminders: Bool { true }
 }

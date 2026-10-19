@@ -67,9 +67,24 @@ struct SessionReducerTests {
     @Test func aSubagentsPermissionRequestStillNeedsTheUser() {
         let result = replay([
             payload("UserPromptSubmit"),
+            sub("PreToolUse", nil, tool: "Agent", input: ["description": .string("Clean up")]),
+            sub("SubagentStart", "a1", type: "Explore"),
             sub("PermissionRequest", "a1", type: "Explore", tool: "Bash", input: ["command": .string("rm x")]),
+            sub("PreToolUse", "a2", type: "Explore", tool: "Read"), // another subagent: still waiting
+            sub("PostToolUse", "a1", type: "Explore", tool: "Bash"), // answered: working again
         ], source: .claude)
-        #expect(result.last?.status == .needsApproval)
+        #expect(result.statuses.suffix(3) == [.needsApproval, .needsApproval, .working])
+        #expect(result.last?.detail == nil)
+    }
+
+    @Test func anAgentCallThatNeverStartsDoesntLabelTheNext() throws {
+        let result = replay([
+            sub("PreToolUse", nil, tool: "Agent", input: ["description": .string("Bad type")]),
+            sub("PostToolUseFailure", nil, tool: "Agent", input: ["description": .string("Bad type")]),
+            sub("PreToolUse", nil, tool: "Agent", input: ["description": .string("Real task")]),
+            sub("SubagentStart", "a2", type: "general-purpose"),
+        ], source: .claude)
+        #expect(try #require(result.last).subagents.map(\.description) == ["Real task"])
     }
 
     @Test func questionsAskedThroughPermissionRequestStayNeedsInput() {

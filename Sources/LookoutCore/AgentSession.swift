@@ -62,6 +62,8 @@ public struct AgentSession: Identifiable, Sendable, Equatable {
     public var subagents: [Subagent] = []
     /// Descriptions of Agent tool calls whose subagent hasn't started yet, oldest first.
     var pendingSubagentTasks: [String] = []
+    /// The subagent whose permission request or question the session is waiting on.
+    var attentionAgentID: String?
     public var branch: String?
     /// When the agent process started.
     public var startedAt: Date?
@@ -128,6 +130,7 @@ public enum SessionReducer {
         s.status = status
         s.detail = detail
         s.tool = toolEvents.contains(p.hookEventName) ? p.toolCall : nil
+        s.attentionAgentID = status.needsAttention ? p.agentID : nil
         return s
     }
 
@@ -152,9 +155,21 @@ public enum SessionReducer {
             return true
         case "SubagentStop":
             s.subagents.removeAll { $0.id == p.agentID }
+            resumeAfterSubagentRequest(p, in: &s, now: now)
             return true
+        case "UserPromptSubmit":
+            s.pendingSubagentTasks = []
         case "PreToolUse", "PostToolUse", "PostToolUseFailure":
-            guard let id = p.agentID else { return false }
+            guard let id = p.agentID else {
+                if p.hookEventName != "PreToolUse", subagentTools.contains(p.toolName ?? "") {
+                    // A call that never started a subagent (refused, unknown type) mustn't label the next one.
+                    var task = ""
+                    if case .string(let text)? = p.toolInput?["description"] { task = text }
+                    if let i = s.pendingSubagentTasks.firstIndex(of: task) { s.pendingSubagentTasks.remove(at: i) }
+                }
+                return false
+            }
+            resumeAfterSubagentRequest(p, in: &s, now: now)
             if let i = s.subagents.firstIndex(where: { $0.id == id }) {
                 s.subagents[i].tool = p.hookEventName == "PreToolUse" ? p.toolCall : nil
             }
@@ -163,6 +178,16 @@ public enum SessionReducer {
             break
         }
         return false
+    }
+
+    /// A subagent that carries on after asking was answered, in the terminal or here: the session is working again.
+    static func resumeAfterSubagentRequest(_ p: HookPayload, in s: inout AgentSession, now: Date) {
+        guard s.status.needsAttention, let id = p.agentID, s.attentionAgentID == id else { return }
+        s.status = .working
+        s.statusSince = now
+        s.detail = nil
+        s.tool = nil
+        s.attentionAgentID = nil
     }
 
     /// How long a working agent can go without a hook event before it's flagged.

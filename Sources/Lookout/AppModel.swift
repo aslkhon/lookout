@@ -78,7 +78,7 @@ final class AppModel: ObservableObject {
         remotes.start()
         Notifier.shared.onActivate = { [weak self] id in
             guard let session = self?.sessions[id] else { return }
-            Focuser.focus(session)
+            Focuser.focusInBackground(session)
         }
         Notifier.shared.onDecide = { [weak self] id, request, decision in self?.decide(id, request: request, decision) }
     }
@@ -140,7 +140,7 @@ final class AppModel: ObservableObject {
     }
 
     func focus(_ session: AgentSession) {
-        Focuser.focus(session)
+        Focuser.focusInBackground(session)
     }
 
     /// Stops watching `host` and drops its sessions.
@@ -149,12 +149,18 @@ final class AppModel: ObservableObject {
         for (key, session) in sessions where session.host == host {
             sessions[key] = nil
             hookDriven.remove(key)
+            approvals[key] = nil // not answered: that would ssh to the host just removed
             Notifier.shared.clear(sessionID: key)
         }
     }
 
     func clearEnded() {
-        sessions = sessions.filter { $0.value.status != .ended }
+        for (key, session) in sessions where session.status == .ended { forget(key) }
+    }
+
+    private func forget(_ key: String) {
+        sessions[key] = nil
+        hookDriven.remove(key)
     }
 
     private func refresh() {
@@ -254,7 +260,7 @@ final class AppModel: ObservableObject {
         let now = Date()
         for (key, session) in sessions {
             if session.status == .ended {
-                if now.timeIntervalSince(session.statusSince) > endedRetention { sessions[key] = nil }
+                if now.timeIntervalSince(session.statusSince) > endedRetention { forget(key) }
             } else if session.host == nil, let pid = session.agentPID, !Self.isAlive(pid) {
                 end(key) // remote sessions are checked by their host's snapshots
             }

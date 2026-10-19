@@ -1,9 +1,15 @@
 import AppKit
 import LookoutCore
 
-/// Brings the window/terminal hosting an agent to the front.
-@MainActor
+/// Brings the window/terminal hosting an agent to the front. AppleScript, tmux and terminal CLIs can
+/// block (a busy app, the first Automation prompt), so it runs on its own queue, never the main thread.
 enum Focuser {
+    private static let queue = DispatchQueue(label: "lookout.focus", qos: .userInitiated)
+
+    static func focusInBackground(_ session: AgentSession) {
+        queue.async { focus(session) }
+    }
+
     static let ghosttyID = "com.mitchellh.ghostty"
 
     /// VS Code–family bundle ids → their Application Support folder name.

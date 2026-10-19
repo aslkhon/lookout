@@ -58,4 +58,8 @@ struct MarkdownBlockTests {
             .paragraph("After"),
         ])
     }
+
+    @Test func tableCellsKeepPipesInCode() {
+        #expect(MarkdownBlock.tableCells(#"| `a|b` | x\|y |"#) == ["", " `a|b` ", " x|y ", ""])
+    }
 }

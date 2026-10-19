@@ -52,5 +52,7 @@ struct PricingTests {
         #expect(Pricing.format(0.004) == "<$0.01")
         #expect(Pricing.format(12.3) == "$12.30")
         #expect(Pricing.format(1e30).hasPrefix("$")) // no Int overflow
+        let huge = Data(#"usage\#t{"input":1,"cache_read":100000000000000000000,"cache_write":9223372036854775807,"output":1}"#.utf8)
+        #expect(Transcript.parseRemoteUsage(huge)?.summary.isEmpty == false) // no trap
     }
 }

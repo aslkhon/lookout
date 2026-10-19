@@ -21,12 +21,13 @@ final class SelfTest: ObservableObject {
 
     /// Session ids of test events; AppModel hands them here instead of showing them as agents.
     static let sessionPrefix = "lookout-self-test-"
+    private var awaited: Set<String> = []
     private var received: [String: Date] = [:]
 
-    /// True if this event is a self-test's; it's then consumed.
+    /// True if this event is a self-test's; it's then consumed. Only the run waiting for it keeps it.
     func claim(_ sessionID: String) -> Bool {
         guard sessionID.hasPrefix(Self.sessionPrefix) else { return false }
-        received[sessionID] = Date()
+        if awaited.contains(sessionID) { received[sessionID] = Date() }
         return true
     }
 
@@ -83,9 +84,10 @@ final class SelfTest: ObservableObject {
     /// Runs the installed hook with a test payload and waits for it to arrive.
     private func eventDelivery(model: AppModel) async -> Check {
         let title = "Events reach Lookout"
-        if let error = model.serverError { return Check(title: title, level: .failed, detail: error) }
         let id = Self.sessionPrefix + UUID().uuidString
         let payload = #"{"session_id":"\#(id)","hook_event_name":"Notification","cwd":"/","message":"Lookout self-test"}"#
+        awaited.insert(id)
+        defer { awaited.remove(id); received[id] = nil }
         let sent = Date()
         let exited = await Task.detached { () -> Int32? in
             let process = Process()
@@ -104,7 +106,8 @@ final class SelfTest: ObservableObject {
         guard exited != nil else { return Check(title: title, level: .failed, detail: "Couldn't run the hook program.") }
         for _ in 0..<30 where received[id] == nil { try? await Task.sleep(for: .milliseconds(100)) }
         guard let arrived = received.removeValue(forKey: id) else {
-            return Check(title: title, level: .failed, detail: "A test event sent through the hook never arrived.")
+            return Check(title: title, level: .failed,
+                         detail: "A test event sent through the hook never arrived." + (model.serverError.map { " \($0)" } ?? ""))
         }
         return Check(title: title, level: .ok, detail: String(format: "A test event arrived in %.2f s", arrived.timeIntervalSince(sent)))
     }

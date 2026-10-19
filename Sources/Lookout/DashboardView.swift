@@ -1078,8 +1078,17 @@ private struct ConversationView: View {
             located = (session.id, url)
         }
         guard let url = located?.url else { entries = []; return }
-        entries = await Task.detached { Transcript.load(url, source: session.source, limit: 150) }.value
-        usage = await Self.tally.usage(of: url, source: session.source)
+        if entries != nil { // a working agent reports several times a second: one read per burst
+            try? await Task.sleep(for: .milliseconds(600))
+        }
+        // A load started for another agent, or for an older event, mustn't overwrite this one.
+        guard !Task.isCancelled else { return }
+        let loaded = await Task.detached { Transcript.load(url, source: session.source, limit: 150) }.value
+        guard !Task.isCancelled else { return }
+        if loaded != entries { entries = loaded }
+        let counted = await Self.tally.usage(of: url, source: session.source)
+        guard !Task.isCancelled else { return }
+        if counted != usage { usage = counted }
     }
 
     /// Over ssh, through the helper Lookout installed on the host.

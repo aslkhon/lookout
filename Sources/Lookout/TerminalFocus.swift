@@ -23,6 +23,7 @@ extension Focuser {
 
     static func focusITerm(tty: String) -> Bool {
         runAppleScript("""
+        with timeout of 5 seconds
         tell application id "\(itermID)"
             repeat with w in windows
                 repeat with t in tabs of w
@@ -38,12 +39,14 @@ extension Focuser {
                 end repeat
             end repeat
         end tell
+        end timeout
         return ""
         """) == "found"
     }
 
     static func focusTerminalApp(tty: String) -> Bool {
         runAppleScript("""
+        with timeout of 5 seconds
         tell application id "\(terminalID)"
             repeat with w in windows
                 repeat with t in tabs of w
@@ -56,6 +59,7 @@ extension Focuser {
                 end repeat
             end repeat
         end tell
+        end timeout
         return ""
         """) == "found"
     }
@@ -126,8 +130,12 @@ extension Focuser {
         process.standardOutput = out
         process.standardError = FileHandle.nullDevice
         guard (try? process.run()) != nil else { return nil }
+        // A wedged tmux server or terminal mustn't hold up every later jump.
+        let deadline = DispatchWorkItem { if process.isRunning { process.terminate() } }
+        DispatchQueue.global().asyncAfter(deadline: .now() + 3, execute: deadline)
         let data = out.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
+        deadline.cancel()
         return process.terminationStatus == 0 ? String(decoding: data, as: UTF8.self) : nil
     }
 }

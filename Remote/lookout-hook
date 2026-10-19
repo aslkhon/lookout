@@ -698,7 +698,7 @@ def token_usage(source, path):
             state["offset"] += len(line)
             add_usage(source, line, state)
     os.makedirs(USAGE_CACHE, mode=0o700, exist_ok=True)
-    tmp = cache + ".tmp"
+    tmp = "%s.%d.tmp" % (cache, os.getpid())  # two reads of one session can run at once
     with open(tmp, "w") as f:
         json.dump(state, f)
     os.replace(tmp, cache)

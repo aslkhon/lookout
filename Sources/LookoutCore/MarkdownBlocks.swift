@@ -13,6 +13,23 @@ public enum MarkdownBlock: Equatable, Sendable {
 }
 
 extension MarkdownBlock {
+    /// A table row split on "|", except inside `code` or after a backslash: plans put shell pipes in tables.
+    static func tableCells(_ line: String) -> [String] {
+        var cells = [""]
+        var inCode = false
+        var escaped = false
+        for c in line {
+            if escaped { cells[cells.count - 1].append(c); escaped = false; continue }
+            switch c {
+            case "\\" where !inCode: escaped = true
+            case "`": inCode.toggle(); cells[cells.count - 1].append(c)
+            case "|" where !inCode: cells.append("")
+            default: cells[cells.count - 1].append(c)
+            }
+        }
+        return cells
+    }
+
     public static func parse(_ markdown: String) -> [MarkdownBlock] {
         var blocks: [MarkdownBlock] = []
         var paragraph: [String] = []
@@ -42,8 +59,7 @@ extension MarkdownBlock {
             if line.isEmpty { flush(); continue }
             if line.hasPrefix("|") {
                 if table.isEmpty { flush() }
-                let cells = line.split(separator: "|", omittingEmptySubsequences: false).dropFirst()
-                    .map { $0.trimmingCharacters(in: .whitespaces) }
+                let cells = tableCells(line).dropFirst().map { $0.trimmingCharacters(in: .whitespaces) }
                 let row = Array(line.hasSuffix("|") ? cells.dropLast() : cells[...])
                 if !row.allSatisfy({ !$0.isEmpty && $0.allSatisfy { "-:".contains($0) } }) { table.append(row) }
                 continue
