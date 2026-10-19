@@ -63,11 +63,18 @@ struct NotchView: View {
         // Idle agents aren't shown in the compact views.
         let live = model.sortedSessions.filter { $0.status != .ended && $0.status != .idle }
         let attention = model.attentionCount
+        // The oldest approval Lookout can answer gets ⌘Y and ⌘N. Not questions, nor plans: those are
+        // answered in the menu or the terminal.
+        let target = live.filter(answerable).min { $0.statusSince < $1.statusSince }
+        // An orange glow while ⌘Y and ⌘N go to Lookout rather than the app in front.
+        let armed = state.expanded && target != nil
+        let shape = UnevenRoundedRectangle(bottomLeadingRadius: state.expanded ? 22 : 9,
+                                           bottomTrailingRadius: state.expanded ? 22 : 9)
         VStack(spacing: 0) {
             if state.expanded {
                 Group {
                     header
-                    list(live)
+                    list(live, target: target?.id)
                 }
                 .transition(.opacity)
             } else {
@@ -78,8 +85,11 @@ struct NotchView: View {
         .frame(width: state.expanded ? Self.width : state.notch.width + 2 * Self.ear, alignment: .top)
         .background(.black)
         // While it grows, the content stays inside the shape.
-        .clipShape(UnevenRoundedRectangle(bottomLeadingRadius: state.expanded ? 22 : 9,
-                                          bottomTrailingRadius: state.expanded ? 22 : 9))
+        .clipShape(shape)
+        // Cast by a shape that runs past the top of the screen, so it glows on three sides only.
+        .background {
+            if armed { shape.fill(.black).padding(.top, -40).shadow(color: .orange.opacity(0.6), radius: 12) }
+        }
         .contentShape(Rectangle())
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { state.islandRect = $0 }
         .contextMenu { AppCommands() }
@@ -89,6 +99,15 @@ struct NotchView: View {
         .onChange(of: attention) { old, new in
             if new > old { state.peek() }
         }
+        .onChange(of: state.expanded ? target?.id : nil, initial: true) { _, id in
+            GlobalShortcut.shared.answer = id.flatMap { model.sessions[$0] }.flatMap(model.decider)
+        }
+        .onDisappear { GlobalShortcut.shared.answer = nil }
+    }
+
+    private func answerable(_ session: AgentSession) -> Bool {
+        session.status == .needsApproval && model.decider(for: session) != nil
+            && model.plan(for: session) == nil && model.questions(for: session).isEmpty
     }
 
     private func ears(_ live: [AgentSession], attention: Int) -> some View {
@@ -131,7 +150,7 @@ struct NotchView: View {
         .frame(height: max(state.notch.height, 28))
     }
 
-    private func list(_ live: [AgentSession]) -> some View {
+    private func list(_ live: [AgentSession], target: String?) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             if live.isEmpty {
                 Text(model.sessions.isEmpty ? "No agents. Start Claude Code, Codex, Gemini CLI or OpenCode in any terminal." : "No active agents.")
@@ -139,7 +158,8 @@ struct NotchView: View {
                     .padding(.vertical, 14).padding(.horizontal, 8)
             }
             ForEach(live.prefix(Self.maxRows)) { session in
-                NotchRow(session: session)
+                NotchRow(session: session, decide: answerable(session) ? model.decider(for: session) : nil,
+                         shortcuts: session.id == target)
                     .padding(.horizontal, 8)
                     .background(state.hoveredRow == session.id ? Color.white.opacity(0.1) : .clear,
                                 in: RoundedRectangle(cornerRadius: 8))
@@ -191,6 +211,10 @@ private struct NotchLimits: View {
 /// or what it said.
 private struct NotchRow: View {
     let session: AgentSession
+    /// Allow and Deny, when Lookout holds this agent's approval.
+    var decide: ((PermissionDecision) -> Void)?
+    /// ⌘Y and ⌘N answer this one.
+    var shortcuts = false
 
     private var title: String {
         [session.projectName, session.name ?? session.branch].compactMap { $0 }.joined(separator: " · ")
@@ -202,6 +226,15 @@ private struct NotchRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.system(size: 13, weight: .semibold)).lineLimit(1)
                 activity.font(.system(size: 12)).lineLimit(2)
+                if let decide {
+                    HStack(spacing: 8) {
+                        Button("Deny") { decide(.deny) }
+                        Button("Allow") { decide(.allow) }.buttonStyle(.borderedProminent)
+                        if shortcuts { ShortcutHint(text: "⌘Y · ⌘N") }
+                    }
+                    .controlSize(.small)
+                    .padding(.top, 4)
+                }
             }
             Spacer(minLength: 8)
             tags

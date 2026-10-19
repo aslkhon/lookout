@@ -4,7 +4,7 @@
 - **More agents:** Cursor's CLI (not installed here, so untested). Gemini CLI and OpenCode on ssh hosts; today they're watched on this Mac only.
 - **Answer Gemini CLI and OpenCode from Lookout:** Gemini's hooks can't answer its permission prompts. OpenCode's plugin could, through its API.
 - **Token counts for Gemini CLI and OpenCode:** the usage chart and session cost only read Claude Code's and Codex's transcripts.
-- **Notch:** approvals and questions in the notch with ⌘Y/⌘N/⌘1–3; a setting for which screen it uses.
+- **Notch:** questions and plans in the notch (⌘1–3); a setting for which screen it uses.
 
 ## Known issues
 - When two subagents ask for permission at the same time, Lookout can only answer the newer request.

@@ -65,11 +65,22 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
 
     private var sound: UNNotificationSound? { Self.sound(named: UserDefaults.standard.string(forKey: Self.soundKey) ?? "Default") }
 
-    private func sound(for session: AgentSession) -> UNNotificationSound? {
+    private func sound(for session: AgentSession) -> UNNotificationSound? { Self.sound(named: soundName(for: session)) }
+
+    private func soundName(for session: AgentSession) -> String {
         guard !session.stalled, let event = SoundEvent(session.status),
               let name = UserDefaults.standard.string(forKey: Self.soundKey(session.source, event)), !name.isEmpty
-        else { return sound }
-        return Self.sound(named: name)
+        else { return UserDefaults.standard.string(forKey: Self.soundKey) ?? "Default" }
+        return name
+    }
+
+    /// The notification's sound without the notification, for the notch.
+    private func play(_ name: String) {
+        switch name {
+        case "Default": NSSound.beep()
+        case "None": break
+        case let name: NSSound(named: NSSound.Name(name))?.play()
+        }
     }
 
     private static func sound(named name: String) -> UNNotificationSound? {
@@ -140,6 +151,13 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             return
         }
         content.subtitle = session.source.displayName
+        // The notch shows it instead of a banner, with the same sound.
+        if ViewModes.shared.mode == .notch, let notch = AppDelegate.shared?.notchPanel {
+            play(soundName(for: session))
+            notch.peek()
+            alertPhone(session, title: content.title, body: "\(content.subtitle): \(content.body)")
+            return
+        }
         content.sound = sound(for: session)
         content.userInfo = ["sessionID": session.id]
         if let request {
