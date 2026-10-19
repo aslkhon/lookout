@@ -26,6 +26,7 @@ final class NotchState: ObservableObject {
     func hover(_ inside: Bool) {
         guard inside != hovering else { return }
         hovering = inside
+        if !inside { openedByYou = false } // at once; folding up waits a moment
         if inside { change(to: true, after: .milliseconds(150), byYou: true) } else { change(to: false, after: .milliseconds(300)) }
     }
 
@@ -39,7 +40,7 @@ final class NotchState: ObservableObject {
     func peek(byYou: Bool = false) {
         task?.cancel()
         expanded = true
-        if byYou { openedByYou = true }
+        openedByYou = byYou || hovering // a peek you didn't ask for disarms, unless you're on it
         change(to: false, after: .seconds(4))
     }
 
