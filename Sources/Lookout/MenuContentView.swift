@@ -8,7 +8,6 @@ struct MenuContentView: View {
     @ObservedObject var model: AppModel
     var openSetup: () -> Void
     @Environment(\.openWindow) private var openWindow
-    @AppStorage(AppDelegate.miniKey) private var miniShown = false
 
     @State private var listHeight: CGFloat = 0
     @State private var searching = false
@@ -111,8 +110,14 @@ struct MenuContentView: View {
                     }
                 }
             }
+            // Idle agents only show up when searching.
+            if query.isEmpty, groups[.needsYou] == nil, groups[.working] == nil, groups[.finished] == nil {
+                Text("No active agents")
+                    .font(.callout).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity).padding(.vertical, 16)
+            }
             ForEach([AgentStatus.Group.idle, .ended], id: \.self) { group in
-                if let members = groups[group], !members.isEmpty {
+                if let members = groups[group], !members.isEmpty, group != .idle || !query.isEmpty {
                     foldedRow(group, members)
                     if expanded.contains(group) || !query.isEmpty {
                         ForEach(members) { session in
@@ -191,8 +196,7 @@ struct MenuContentView: View {
                 .keyboardShortcut("o")
             footerButton("Setup…", shortcut: "⌘,") { closeMenu(); openSetup() }
                 .keyboardShortcut(",")
-            Button(miniShown ? "Hide Mini" : "Mini") { closeMenu(); AppDelegate.shared?.toggleMini() }
-                .help("A small window with your projects that floats above other apps")
+            ViewSwitcher(willSwitch: closeMenu)
             Spacer()
             Button("Quit") { NSApp.terminate(nil) }
                 .keyboardShortcut("q")

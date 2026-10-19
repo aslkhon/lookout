@@ -6,9 +6,11 @@ import SwiftUI
 struct LookoutApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @ObservedObject private var model = AppModel.shared
+    @ObservedObject private var views = ViewModes.shared
 
     var body: some Scene {
-        MenuBarExtra {
+        // Only in the menu bar view.
+        MenuBarExtra(isInserted: Binding(get: { views.mode == .menuBar || !views.ready }, set: { _ in })) {
             MenuContentView(model: model, openSetup: { delegate.showSetup() })
         } label: {
             MenuBarLabel(count: model.attentionCount)
@@ -22,11 +24,13 @@ struct LookoutApp: App {
                 .onAppear {
                     AppDelegate.dashboardOpen = true
                     NSApp.setActivationPolicy(.regular) // in the Dock and ⌘-Tab while open
-                    AppDelegate.shared?.closeMini() // one or the other, never both
+                    // Opened some other way (a notification, the Dock): it's the view now.
+                    if ViewModes.shared.mode != .window { AppDelegate.shared?.switchView(to: .window) }
                 }
                 .onDisappear {
                     AppDelegate.dashboardOpen = false
                     NSApp.setActivationPolicy(.accessory)
+                    AppDelegate.shared?.dashboardClosed()
                 }
         }
         .defaultSize(width: 980, height: 600)
@@ -43,6 +47,12 @@ private struct MenuBarLabel: View {
             .onAppear {
                 AppDelegate.openDashboard = { openWindow(id: "dashboard") }
                 AppDelegate.closeDashboard = { dismissWindow(id: "dashboard") }
+                // First appearance: the dashboard can open now, so show the saved view. (If this
+                // comes before applicationDidFinishLaunching, that shows it instead.)
+                if !ViewModes.shared.ready {
+                    ViewModes.shared.ready = true
+                    AppDelegate.shared?.showSavedView()
+                }
             }
         if count > 0 { Text("\(count)") }
     }
@@ -52,6 +62,7 @@ private struct MenuBarLabel: View {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var setupWindow: NSWindow?
     var miniPanel: NSPanel?
+    var notchPanel: NotchPanel?
     /// For views outside the App struct (the dashboard's toolbar, the menu).
     private(set) static weak var shared: AppDelegate?
     /// SwiftUI's openWindow for the dashboard, captured from the menu bar label.
@@ -68,13 +79,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         GlobalShortcut.shared.update()
         AppModel.shared.start()
         _ = Updater.shared
+        if ViewModes.shared.ready { showSavedView() }
         if AppModel.shared.needsSetup {
             showSetup()
         } else {
             // Hooks already present (reinstall, new bundle id): make sure notifications are authorized.
             Task { await Notifier.shared.requestAuthorization() }
         }
-        if UserDefaults.standard.bool(forKey: Self.miniKey) { showMini() }
+    }
+
+    func showSavedView() {
+        DispatchQueue.main.async { self.switchView(to: ViewModes.shared.mode) }
     }
 
     func showSetup() {
@@ -94,6 +109,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate()
         setupWindow?.makeKeyAndOrderFront(nil)
     }
+
+    /// The menu bar icon is hidden in the other views: that's not a reason to quit.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
     /// Clicking the Dock icon reopens the dashboard.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {

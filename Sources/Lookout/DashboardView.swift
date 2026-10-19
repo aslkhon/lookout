@@ -259,7 +259,7 @@ struct DashboardView: View {
             .help("Group agents by status or by project")
         }
         ToolbarItem { pinToggle }
-        ToolbarItem { miniToggle }
+        ToolbarItem { ViewSwitcher(size: 13) }
         ToolbarItem {
             Button("Usage", systemImage: "chart.bar") { showsUsage = true }
                 .help("Turns and agent time per project")
@@ -293,12 +293,6 @@ struct DashboardView: View {
         Button(onTop ? "Don't Keep on Top" : "Keep on Top", systemImage: onTop ? "pin.fill" : "pin") { onTop.toggle() }
             .keyboardShortcut("t", modifiers: [.option, .command])
             .help(onTop ? "Stop keeping this window above other apps" : "Keep this window above other apps")
-    }
-
-    private var miniToggle: some View {
-        Button("Compact Mode", systemImage: "pip") { AppDelegate.shared?.showMini() }
-            .keyboardShortcut("m", modifiers: [.shift, .command]) // ⌥⌘M is Minimize All
-            .help("Switch to a small window of your projects that floats above other apps")
     }
 
     private var inspectorToggle: some View {

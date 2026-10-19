@@ -6,39 +6,16 @@ import SwiftUI
 struct MiniView: View {
     @ObservedObject var model: AppModel
     var openDashboard: () -> Void
-    var close: () -> Void
 
     var body: some View {
-        let projects = Dictionary(grouping: model.sortedSessions.filter { $0.status != .ended }, by: \.projectName)
-            .sorted { $0.key.localizedStandardCompare($1.key) == .orderedAscending }
-        let columns = projects.count > 2 ? 2 : 1
         VStack(alignment: .leading, spacing: 6) {
             titleBar
-            HStack(alignment: .top, spacing: 6) {
-                if projects.isEmpty {
-                    Label("No agents", systemImage: "binoculars")
-                        .font(.callout).foregroundStyle(.secondary)
-                        .padding(.horizontal, 12).padding(.vertical, 8)
-                }
-                ForEach(0..<columns, id: \.self) { column in
-                    VStack(spacing: 6) {
-                        ForEach(projects.indices.filter { $0 % columns == column }, id: \.self) { i in
-                            MiniCard(name: projects[i].key, sessions: projects[i].value,
-                                     focus: { model.focus($0) },
-                                     openDashboard: { model.showProject = projects[i].key; openDashboard() })
-                        }
-                    }
-                }
-            }
+            ProjectGrid(model: model, openDashboard: openDashboard)
         }
         .padding(8)
         .fixedSize()
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
-        .contextMenu {
-            Button("Back to the Full Window") { close(); openDashboard() }
-            Button("Open Dashboard", action: openDashboard)
-            Button("Close Mini Window", action: close)
-        }
+        .contextMenu { AppCommands() }
     }
 
     /// Always visible: the panel never becomes key, so it gets no hover events to reveal buttons with.
@@ -46,17 +23,42 @@ struct MiniView: View {
         HStack(spacing: 10) {
             Label("Lookout", systemImage: "binoculars").font(.system(size: 11, weight: .medium))
             Spacer(minLength: 0)
-            Button { close(); openDashboard() } label: {
-                Image(systemName: "arrow.up.left.and.arrow.down.right")
-            }
-            .help("Back to the Full Window")
-            Button(action: close) { Image(systemName: "xmark") }
-                .help("Close Mini Window")
+            ViewSwitcher(size: 10)
         }
-        .buttonStyle(.plain)
         .font(.system(size: 11, weight: .semibold))
         .foregroundStyle(.secondary)
         .padding(.horizontal, 4)
+    }
+}
+
+/// Live agents as project cards, in two columns once there are more than two projects.
+/// Shared by the mini window and the notch.
+struct ProjectGrid: View {
+    @ObservedObject var model: AppModel
+    var openDashboard: () -> Void
+
+    var body: some View {
+        // Idle agents aren't shown in the compact views.
+        let projects = Dictionary(grouping: model.sortedSessions.filter { $0.status != .ended && $0.status != .idle },
+                                  by: \.projectName)
+            .sorted { $0.key.localizedStandardCompare($1.key) == .orderedAscending }
+        let columns = projects.count > 2 ? 2 : 1
+        HStack(alignment: .top, spacing: 6) {
+            if projects.isEmpty {
+                Label(model.sessions.isEmpty ? "No agents" : "No active agents", systemImage: "binoculars")
+                    .font(.callout).foregroundStyle(.secondary)
+                    .padding(.horizontal, 12).padding(.vertical, 8)
+            }
+            ForEach(0..<columns, id: \.self) { column in
+                VStack(spacing: 6) {
+                    ForEach(projects.indices.filter { $0 % columns == column }, id: \.self) { i in
+                        MiniCard(name: projects[i].key, sessions: projects[i].value,
+                                 focus: { model.focus($0) },
+                                 openDashboard: { model.showProject = projects[i].key; openDashboard() })
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -142,16 +144,8 @@ private struct MiniRow: View {
 }
 
 extension AppDelegate {
-    /// UserDefaults key: the mini window is open, and reopens at launch.
-    static let miniKey = "miniWindowShown"
-
-    func toggleMini() {
-        if miniPanel?.isVisible == true { closeMini() } else { showMini() }
-    }
-
-    /// Replaces the dashboard: the two are never open at once.
+    /// Shows the panel; `switchView` closes the other views.
     func showMini() {
-        if Self.dashboardOpen { Self.closeDashboard?() }
         if miniPanel == nil {
             // Non-activating: clicking a tile never pulls Lookout in front of the app you're working in.
             let panel = MiniPanel(contentRect: NSRect(x: 0, y: 0, width: 200, height: 80),
@@ -167,27 +161,21 @@ extension AppDelegate {
             panel.isReleasedWhenClosed = false
             let hosting = NSHostingController(rootView: MiniView(
                 model: AppModel.shared,
-                openDashboard: { NSApp.activate(); AppDelegate.openDashboard?() },
-                close: { [weak self] in self?.closeMini() }))
-            hosting.sizingOptions = .preferredContentSize // the window follows the tiles
+                openDashboard: { [weak self] in self?.switchView(to: .window) })
+                .reportingSize { [weak panel] in panel?.fit($0) }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading))
+            hosting.sizingOptions = []
             panel.contentViewController = hosting
-            panel.setContentSize(hosting.view.fittingSize)
             panel.restorePosition()
             miniPanel = panel
         }
         miniPanel?.orderFrontRegardless()
-        UserDefaults.standard.set(true, forKey: Self.miniKey)
-    }
-
-    func closeMini() {
-        miniPanel?.orderOut(nil)
-        UserDefaults.standard.set(false, forKey: Self.miniKey)
     }
 }
 
 /// Grows and shrinks from its top-left corner, and remembers where that corner was dragged.
 /// (The window frame autosave restored it on the wrong spot with several screens.)
-private final class MiniPanel: NSPanel {
+final class MiniPanel: NSPanel {
     private static let topLeftKey = "miniWindowTopLeft"
     /// The top-left corner to keep while the content changes size.
     private var anchor: NSPoint?
@@ -197,16 +185,7 @@ private final class MiniPanel: NSPanel {
 
     override init(contentRect: NSRect, styleMask: NSWindow.StyleMask, backing: NSWindow.BackingStoreType, defer flag: Bool) {
         super.init(contentRect: contentRect, styleMask: styleMask, backing: backing, defer: flag)
-        let center = NotificationCenter.default
-        // A resize keeps the bottom-left corner, so it doesn't post a move: put the top-left back.
-        center.addObserver(forName: NSWindow.didResizeNotification, object: self, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                if let screen = self.defaultScreen { self.anchor = Self.topRight(of: screen, width: self.frame.width) }
-                if let anchor = self.anchor { self.place(anchor) }
-            }
-        }
-        center.addObserver(forName: NSWindow.didMoveNotification, object: self, queue: .main) { [weak self] _ in
+        NotificationCenter.default.addObserver(forName: NSWindow.didMoveNotification, object: self, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
                 if !self.placing { self.defaultScreen = nil } // dragged
@@ -227,6 +206,15 @@ private final class MiniPanel: NSPanel {
             anchor = Self.topRight(of: screen, width: frame.width)
         }
         if let anchor { place(anchor) }
+    }
+
+    /// Takes the content's size, keeping the top-left corner.
+    func fit(_ size: CGSize) {
+        if let screen = defaultScreen { anchor = Self.topRight(of: screen, width: size.width) }
+        let topLeft = anchor ?? NSPoint(x: frame.minX, y: frame.maxY)
+        placing = true
+        setFrame(NSRect(x: topLeft.x, y: topLeft.y - size.height, width: size.width, height: size.height), display: true)
+        placing = false
     }
 
     private func place(_ topLeft: NSPoint) {

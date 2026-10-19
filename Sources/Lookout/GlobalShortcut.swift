@@ -1,7 +1,8 @@
 import AppKit
 import Carbon.HIToolbox
 
-/// ⌥⇧L from any app opens Lookout's menu panel (or the dashboard, if the panel can't be found).
+/// ⌥⇧L from any app brings up the current view: opens the menu panel, unfolds the notch, or
+/// brings the mini or full window to the front.
 @MainActor
 final class GlobalShortcut {
     static let shared = GlobalShortcut()
@@ -35,8 +36,17 @@ final class GlobalShortcut {
         hotKey = nil
     }
 
-    /// Clicks Lookout's own menu bar item, which opens (or closes) its panel.
     static func openPanel() {
+        switch ViewModes.shared.mode {
+        case .menuBar: clickMenuBarItem()
+        case .notch: AppDelegate.shared?.notchPanel?.peek()
+        case .mini: AppDelegate.shared?.miniPanel?.orderFrontRegardless()
+        case .window: AppDelegate.shared?.switchView(to: .window)
+        }
+    }
+
+    /// Clicks Lookout's own menu bar item, which opens (or closes) its panel.
+    private static func clickMenuBarItem() {
         let button = NSApp.windows.lazy
             .filter { $0.className == "NSStatusBarWindow" }
             .compactMap { $0.contentView.flatMap(statusButton) }
