@@ -28,11 +28,12 @@ public struct TokenUsage: Equatable, Sendable {
         return parts.joined(separator: " · ")
     }
 
-    /// "950", "84k", "17.2M".
+    /// "950", "84k", "17.2M", "2.1B".
     public static func short(_ n: Int) -> String {
         if n < 1000 { return "\(n)" }
         if n < 1_000_000 { return "\(n / 1000)k" }
-        return String(format: "%.1fM", Double(n) / 1_000_000)
+        if n < 1_000_000_000 { return String(format: "%.1fM", Double(n) / 1_000_000) }
+        return String(format: "%.1fB", Double(n) / 1_000_000_000)
     }
 
     /// Takes in one transcript line. Claude: an assistant message's usage, once per message (each content
