@@ -9,6 +9,9 @@ import SwiftUI
 @MainActor
 final class NotchState: ObservableObject {
     @Published var expanded = false
+    /// You opened it (hover or ⌥⇧L) rather than it peeking on its own. Only then do ⌘Y and ⌘N
+    /// answer, so a keystroke meant for another app can't approve something you haven't seen.
+    @Published private(set) var openedByYou = false
     /// The notch's size on the chosen screen.
     @Published var notch = CGSize(width: 180, height: 24)
     /// The black shape, in the window's SwiftUI coordinates: only there does the window take clicks.
@@ -23,7 +26,7 @@ final class NotchState: ObservableObject {
     func hover(_ inside: Bool) {
         guard inside != hovering else { return }
         hovering = inside
-        if inside { change(to: true, after: .milliseconds(150)) } else { change(to: false, after: .milliseconds(300)) }
+        if inside { change(to: true, after: .milliseconds(150), byYou: true) } else { change(to: false, after: .milliseconds(300)) }
     }
 
     /// `point` is in the window's SwiftUI coordinates, nil when the mouse is off the island.
@@ -32,19 +35,21 @@ final class NotchState: ObservableObject {
         if row != hoveredRow { hoveredRow = row }
     }
 
-    /// Unfolds for a few seconds to show what changed.
-    func peek() {
+    /// Unfolds for a few seconds to show what changed, or because you pressed ⌥⇧L.
+    func peek(byYou: Bool = false) {
         task?.cancel()
         expanded = true
+        if byYou { openedByYou = true }
         change(to: false, after: .seconds(4))
     }
 
-    private func change(to open: Bool, after delay: Duration) {
+    private func change(to open: Bool, after delay: Duration, byYou: Bool = false) {
         task?.cancel()
         task = Task {
             try? await Task.sleep(for: delay)
             guard !Task.isCancelled, open || !hovering else { return }
             expanded = open
+            if !open { openedByYou = false } else if byYou { openedByYou = true }
         }
     }
 }
@@ -67,14 +72,14 @@ struct NotchView: View {
         // answered in the menu or the terminal.
         let target = live.filter(answerable).min { $0.statusSince < $1.statusSince }
         // An orange glow while ⌘Y and ⌘N go to Lookout rather than the app in front.
-        let armed = state.expanded && target != nil
+        let armed = state.expanded && state.openedByYou && target != nil
         let shape = UnevenRoundedRectangle(bottomLeadingRadius: state.expanded ? 22 : 9,
                                            bottomTrailingRadius: state.expanded ? 22 : 9)
         VStack(spacing: 0) {
             if state.expanded {
                 Group {
                     header
-                    list(live, target: target?.id)
+                    list(live, target: armed ? target?.id : nil)
                 }
                 .transition(.opacity)
             } else {
@@ -99,7 +104,7 @@ struct NotchView: View {
         .onChange(of: attention) { old, new in
             if new > old { state.peek() }
         }
-        .onChange(of: state.expanded ? target?.id : nil, initial: true) { _, id in
+        .onChange(of: armed ? target?.id : nil, initial: true) { _, id in
             GlobalShortcut.shared.answer = id.flatMap { model.sessions[$0] }.flatMap(model.decider)
         }
         .onDisappear { GlobalShortcut.shared.answer = nil }
@@ -337,7 +342,7 @@ final class NotchPanel: NSPanel {
         state.mouse(at: inside && state.expanded ? CGPoint(x: mouse.x - frame.minX, y: frame.maxY - mouse.y) : nil)
     }
 
-    func peek() { state.peek() }
+    func peek(byYou: Bool = false) { state.peek(byYou: byYou) }
 
     /// The built-in screen if it has a notch, else the menu bar's screen.
     private var notchScreen: NSScreen? {

@@ -13,6 +13,9 @@ final class GlobalShortcut {
 
     private var hotKey: EventHotKeyRef?
     private var answerKeys: [EventHotKeyRef] = []
+    /// When `answer` last changed: presses in the next half second are ignored, so a key already on
+    /// its way when an approval appears can't answer it.
+    private var armedAt = Date.distantPast
     private var handler: EventHandlerRef?
 
     private static let openID: UInt32 = 1, allowID: UInt32 = 2, denyID: UInt32 = 3
@@ -20,6 +23,7 @@ final class GlobalShortcut {
     /// Answers the approval the notch shows; ⌘Y and ⌘N are taken from other apps only while it's set.
     var answer: ((PermissionDecision) -> Void)? {
         didSet {
+            if answer != nil { armedAt = .now }
             guard (answer == nil) != (oldValue == nil) else { return }
             if answer != nil {
                 installHandler()
@@ -61,14 +65,19 @@ final class GlobalShortcut {
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     switch id.id {
-                    case GlobalShortcut.allowID: GlobalShortcut.shared.answer?(.allow)
-                    case GlobalShortcut.denyID: GlobalShortcut.shared.answer?(.deny)
+                    case GlobalShortcut.allowID: GlobalShortcut.shared.answerIfSettled(.allow)
+                    case GlobalShortcut.denyID: GlobalShortcut.shared.answerIfSettled(.deny)
                     default: GlobalShortcut.openPanel()
                     }
                 }
             }
             return noErr
         }, 1, &type, nil, &handler)
+    }
+
+    private func answerIfSettled(_ decision: PermissionDecision) {
+        guard Date.now.timeIntervalSince(armedAt) >= 0.5 else { return }
+        answer?(decision)
     }
 
     private func unregister() {
@@ -79,7 +88,7 @@ final class GlobalShortcut {
     static func openPanel() {
         switch ViewModes.shared.mode {
         case .menuBar: clickMenuBarItem()
-        case .notch: AppDelegate.shared?.notchPanel?.peek()
+        case .notch: AppDelegate.shared?.notchPanel?.peek(byYou: true)
         case .mini: AppDelegate.shared?.miniPanel?.orderFrontRegardless()
         case .window: AppDelegate.shared?.switchView(to: .window)
         }
