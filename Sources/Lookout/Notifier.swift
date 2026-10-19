@@ -25,6 +25,12 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     static let defaultQuietStart = 22 * 60
     static let defaultQuietEnd = 8 * 60
 
+    /// Phone alerts through Bark: the key (or the URL the Bark app copies), whether finished turns
+    /// are sent too, and whether only while you're away from the Mac (the default).
+    static let barkKey = "barkKey"
+    static let barkFinishedKey = "barkFinished"
+    static let barkAwayKey = "barkOnlyAway"
+
     /// The sounds in /System/Library/Sounds, e.g. "Glass" and "Ping".
     static let systemSounds: [String] = ((try? FileManager.default.contentsOfDirectory(atPath: "/System/Library/Sounds")) ?? [])
         .map { ($0 as NSString).deletingPathExtension }
@@ -145,6 +151,31 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         }
         // Reusing the session id replaces any earlier notification for the same agent.
         center.add(UNNotificationRequest(identifier: session.id, content: content, trigger: nil))
+        alertPhone(session, title: content.title, body: "\(content.subtitle): \(content.body)")
+    }
+
+    private func alertPhone(_ session: AgentSession, title: String, body: String) {
+        let defaults = UserDefaults.standard
+        guard let bark = Bark(defaults.string(forKey: Self.barkKey) ?? "") else { return }
+        if session.status == .finished, !defaults.bool(forKey: Self.barkFinishedKey) { return }
+        if defaults.object(forKey: Self.barkAwayKey) as? Bool ?? true, !AwayWatcher.shared.isAway { return }
+        Task { await Self.push(bark, title: title, body: body, urgent: session.status.needsAttention || session.stalled) }
+    }
+
+    /// Nil once Bark took it, else what went wrong.
+    @discardableResult
+    nonisolated static func push(_ bark: Bark, title: String, body: String, urgent: Bool) async -> String? {
+        do {
+            let (data, response) = try await URLSession.shared.data(for: bark.request(title: title, body: body, urgent: urgent))
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            if Bark.accepted(data, status: status) { return nil }
+            let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["message"] as? String
+            log.error("Bark push failed: \(status) \(message ?? "", privacy: .public)")
+            return "Bark said \(status)" + (message.map { ": \($0)" } ?? "")
+        } catch {
+            log.error("Bark push failed: \(error.localizedDescription, privacy: .public)")
+            return error.localizedDescription
+        }
     }
 
     /// "While you were away": one notification for everything that happened, minus muted projects.

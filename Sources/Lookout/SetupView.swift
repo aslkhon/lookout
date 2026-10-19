@@ -30,6 +30,9 @@ struct SetupView: View {
     @AppStorage(Notifier.quietStartKey) private var quietStart = Notifier.defaultQuietStart
     @AppStorage(Notifier.quietEndKey) private var quietEnd = Notifier.defaultQuietEnd
     @AppStorage(Presenting.key) private var silenceWhilePresenting = true
+    @AppStorage(Notifier.barkKey) private var barkKey = ""
+    @AppStorage(Notifier.barkAwayKey) private var barkOnlyAway = true
+    @AppStorage(Notifier.barkFinishedKey) private var barkFinished = false
     @AppStorage(KeepAwake.key) private var keepAwake = false
     @AppStorage(GlobalShortcut.key) private var globalShortcut = true
     /// Bumped after file changes so installed states are re-read.
@@ -167,6 +170,8 @@ struct SetupView: View {
             }
         }
         Divider()
+        phoneAlerts
+        Divider()
         SetupRow(state: nil, title: "Notification sound", subtitle: "Plays with every notification, unless it has its own sound below.") {
             SoundPicker(selection: $sound)
         }
@@ -192,6 +197,39 @@ struct SetupView: View {
                  subtitle: "No notifications while you share or record the screen, mirror a display, or play a Keynote or PowerPoint slideshow.") {
             Toggle("", isOn: $silenceWhilePresenting).toggleStyle(.switch).controlSize(.small).labelsHidden()
         }
+    }
+
+    /// Bark on the iPhone: paste the key or URL from the Bark app.
+    private var phoneAlerts: some View {
+        let bark = Bark(barkKey)
+        return VStack(alignment: .leading, spacing: 8) {
+            SetupRow(state: bark != nil ? .ok : barkKey.isEmpty ? .missing : .warning, title: "Phone alerts",
+                     subtitle: "Approvals, questions and stalls on your iPhone through the free Bark app. Paste the key or URL it shows.",
+                     message: messages["bark"] ?? (bark == nil && !barkKey.isEmpty ? "⚠️ That isn't a Bark key or URL." : nil)) {
+                if busy.contains("bark") {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Button("Send a test") { Task { await testBark() } }.disabled(bark == nil)
+                }
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                TextField("Bark key or https://api.day.app/…", text: $barkKey)
+                    .textFieldStyle(.roundedBorder)
+                Toggle("Only while I'm away (screen locked or asleep, or no input for \(Int(AwayWatcher.idleAway / 60)) minutes)", isOn: $barkOnlyAway)
+                Toggle("Finished turns too", isOn: $barkFinished)
+            }
+            .controlSize(.small)
+            .padding(.leading, 44).padding(.trailing, 14).padding(.bottom, 11)
+        }
+    }
+
+    private func testBark() async {
+        guard let bark = Bark(barkKey) else { return }
+        busy.insert("bark")
+        defer { busy.remove("bark") }
+        let error = await Notifier.push(bark, title: "Lookout phone alerts work",
+                                        body: "You'll get approvals, questions and stalls here.", urgent: false)
+        messages["bark"] = error.map { "❌ \($0)" } ?? "Sent. Check your iPhone."
     }
 
     /// A sound for each agent and kind of notification, so you can tell them apart without looking.

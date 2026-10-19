@@ -29,6 +29,14 @@ final class AwayWatcher {
         }
     }
 
+    /// For phone alerts: the screen is locked or asleep, or nobody has touched the Mac for a while.
+    var isAway: Bool {
+        awaySince != nil
+            || CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: CGEventType(rawValue: ~0)!) >= Self.idleAway
+    }
+
+    static let idleAway: TimeInterval = 5 * 60
+
     private func leave() {
         if awaySince == nil { awaySince = Date() }
     }
