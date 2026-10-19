@@ -334,7 +334,7 @@ struct DashboardView: View {
                 ContentUnavailableView(all.isEmpty ? "No Agents Yet" : "Nothing Here",
                                        systemImage: "binoculars",
                                        description: Text(all.isEmpty
-                                           ? "Start Claude Code or Codex in any terminal."
+                                           ? "Start Claude Code, Codex, Gemini CLI or OpenCode in any terminal."
                                            : "No agents match these filters."))
             }
         }

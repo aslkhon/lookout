@@ -134,7 +134,7 @@ struct NotchView: View {
     private func list(_ live: [AgentSession]) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             if live.isEmpty {
-                Text(model.sessions.isEmpty ? "No agents. Start Claude Code or Codex in any terminal." : "No active agents.")
+                Text(model.sessions.isEmpty ? "No agents. Start Claude Code, Codex, Gemini CLI or OpenCode in any terminal." : "No active agents.")
                     .font(.callout).foregroundStyle(.secondary)
                     .padding(.vertical, 14).padding(.horizontal, 8)
             }

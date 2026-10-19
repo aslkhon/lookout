@@ -39,6 +39,8 @@ public enum Transcript {
                 .filter { $0.1 >= started }
                 .sorted { $0.1 > $1.1 }
                 .first { rolloutCwd($0.0) == session.cwd }?.0
+        case .gemini, .opencode:
+            return nil
         }
     }
 

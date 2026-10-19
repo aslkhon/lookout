@@ -49,13 +49,18 @@ struct SourceChip: View {
 }
 
 /// The agent's logo (Claude and OpenAI marks from Simple Icons, CC0), tinted like a symbol.
+/// Gemini CLI and OpenCode get a symbol.
 struct AgentLogo: View {
     let source: AgentSource
     var size: CGFloat = 14
 
     private static let images: [AgentSource: NSImage] = AgentSource.allCases.reduce(into: [:]) { images, source in
-        let name = source == .claude ? "ClaudeLogo" : "CodexLogo"
-        guard let url = Bundle.main.url(forResource: name, withExtension: "pdf"),
+        let name: String? = switch source {
+        case .claude: "ClaudeLogo"
+        case .codex: "CodexLogo"
+        case .gemini, .opencode: nil
+        }
+        guard let name, let url = Bundle.main.url(forResource: name, withExtension: "pdf"),
               let image = NSImage(contentsOf: url) else { return }
         image.isTemplate = true
         images[source] = image
@@ -67,6 +72,15 @@ struct AgentLogo: View {
                 .resizable()
                 .frame(width: size, height: size)
                 .foregroundStyle(source == .claude ? Color(red: 0.85, green: 0.47, blue: 0.34) : .primary)
+        } else if source == .gemini {
+            Image(systemName: "sparkle")
+                .font(.system(size: size * 0.9, weight: .semibold))
+                .frame(width: size, height: size)
+                .foregroundStyle(Color(red: 0.31, green: 0.52, blue: 0.96))
+        } else if source == .opencode {
+            Image(systemName: "chevron.left.forwardslash.chevron.right")
+                .font(.system(size: size * 0.7, weight: .bold))
+                .frame(width: size, height: size)
         } else {
             Image(systemName: "terminal") // not bundled, e.g. under `swift run`
         }

@@ -39,7 +39,7 @@ struct SetupView: View {
     private var installer: HookInstaller { model.installer }
 
     private func present(_ source: AgentSource) -> Bool {
-        FileManager.default.fileExists(atPath: LookoutPaths.home.appendingPathComponent(source == .claude ? ".claude" : ".codex").path)
+        FileManager.default.fileExists(atPath: LookoutPaths.home.appendingPathComponent(source.configDir).path)
     }
 
     static var version: String {
@@ -83,7 +83,7 @@ struct SetupView: View {
         .confirmationDialog("Remove Lookout's hooks from this Mac?", isPresented: $confirmRemoveAll) {
             Button("Remove Hooks", role: .destructive) { removeAll() }
         } message: {
-            Text("Takes Lookout's entries out of ~/.claude/settings.json and ~/.codex/hooks.json and uninstalls the editor extensions. Remote hosts keep theirs; use Remove on each host.")
+            Text("Takes Lookout's entries out of the Claude Code, Codex and Gemini CLI settings, deletes its OpenCode plugin and uninstalls the editor extensions. Remote hosts keep theirs; use Remove on each host.")
         }
     }
 
@@ -140,6 +140,10 @@ struct SetupView: View {
         hookRow(.claude)
         Divider()
         hookRow(.codex)
+        Divider()
+        hookRow(.gemini)
+        Divider()
+        hookRow(.opencode)
         ForEach(editors, id: \.bundleID) { editor in
             Divider()
             editorRow(editor)
@@ -298,21 +302,21 @@ struct SetupView: View {
     private func hookRow(_ source: AgentSource) -> some View {
         let installed = installer.isInstalled(source)
         let found = model.sessions.values.filter { $0.host == nil && $0.source == source && $0.status != .ended }.count
-        let file = source == .claude ? "~/.claude/settings.json" : "~/.codex/hooks.json"
+        let file = "~/" + installer.configURL(for: source).path.dropFirst(installer.home.path.count + 1)
         let subtitle: String
         if !present(source) {
-            subtitle = "\(source.displayName) isn't set up on this Mac (no ~/.\(source.rawValue) folder)"
+            subtitle = "\(source.displayName) isn't set up on this Mac (no ~/\(source.configDir) folder)"
         } else if installed {
             let entries = installer.entryCount(source)
             subtitle = (source == .claude ? "Installed · \(entries) entries in \(file)" : "Installed · \(file)")
                 + " · \(found) agent\(found == 1 ? "" : "s") found"
         } else {
-            subtitle = "Not installed · adds hook entries to \(file)"
+            subtitle = (source == .opencode ? "Not installed · adds a plugin at \(file)" : "Not installed · adds hook entries to \(file)")
                 + (source == .codex ? " and trusts them through Codex" : "")
         }
         let id = source.rawValue
         return SetupRow(state: installed ? .ok : present(source) ? .missing : .unknown,
-                        title: "\(source.displayName) hooks", subtitle: subtitle, message: messages[id]) {
+                        title: "\(source.displayName) \(source == .opencode ? "plugin" : "hooks")", subtitle: subtitle, message: messages[id]) {
             if busy.contains(id) {
                 ProgressView().controlSize(.small)
             } else if present(source) {
@@ -429,7 +433,7 @@ struct SetupView: View {
     }
 
     private func showBackups() {
-        let files = [installer.claudeSettingsURL, installer.codexHooksURL]
+        let files = [installer.claudeSettingsURL, installer.codexHooksURL, installer.geminiSettingsURL]
             .filter { FileManager.default.fileExists(atPath: $0.path) }
         if files.isEmpty {
             NSWorkspace.shared.open(LookoutPaths.home)

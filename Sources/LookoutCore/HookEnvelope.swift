@@ -1,12 +1,24 @@
 import Foundation
 
 public enum AgentSource: String, Codable, Sendable, CaseIterable {
-    case claude, codex
+    case claude, codex, gemini, opencode
 
     public var displayName: String {
         switch self {
         case .claude: "Claude Code"
         case .codex: "Codex"
+        case .gemini: "Gemini CLI"
+        case .opencode: "OpenCode"
+        }
+    }
+
+    /// The agent's folder under the home folder; it's set up on this Mac when the folder exists.
+    public var configDir: String {
+        switch self {
+        case .claude: ".claude"
+        case .codex: ".codex"
+        case .gemini: ".gemini"
+        case .opencode: ".config/opencode"
         }
     }
 }
@@ -82,6 +94,8 @@ public struct HookPayload: Codable, Sendable {
     /// Set on events from inside a Claude subagent, and on SubagentStart/SubagentStop.
     public var agentID: String?
     public var agentType: String?
+    /// Gemini CLI's AfterAgent: the turn's final reply.
+    public var promptResponse: String?
 
     enum CodingKeys: String, CodingKey {
         case sessionID = "session_id"
@@ -95,6 +109,7 @@ public struct HookPayload: Codable, Sendable {
         case lastAssistantMessage = "last_assistant_message"
         case agentID = "agent_id"
         case agentType = "agent_type"
+        case promptResponse = "prompt_response"
     }
 
     public init(sessionID: String, hookEventName: String, cwd: String? = nil, toolName: String? = nil,
@@ -121,13 +136,34 @@ public struct HookPayload: Codable, Sendable {
 
     public var toolCall: ToolCall? {
         guard let toolName else { return nil }
-        let keys = ["command", "file_path", "path", "url", "pattern", "description"]
+        let keys = ["command", "file_path", "filePath", "absolute_path", "path", "dir_path", "url", "pattern", "description"]
         for key in keys {
             if case .string(let value)? = toolInput?[key], !value.isEmpty {
                 return ToolCall(name: toolName, argument: value)
             }
         }
         return ToolCall(name: toolName, argument: nil)
+    }
+}
+
+extension HookPayload {
+    /// Gemini CLI's events under the Claude Code names the reducer knows. OpenCode's plugin already
+    /// sends those names.
+    public func normalized(for source: AgentSource) -> HookPayload {
+        guard source == .gemini else { return self }
+        var p = self
+        switch hookEventName {
+        case "BeforeAgent": p.hookEventName = "UserPromptSubmit"
+        case "BeforeTool": p.hookEventName = "PreToolUse"
+        case "AfterTool": p.hookEventName = "PostToolUse"
+        case "AfterAgent":
+            p.hookEventName = "Stop"
+            p.lastAssistantMessage = promptResponse
+        case "Notification" where notificationType == "ToolPermission":
+            p.notificationType = "permission_prompt"
+        default: break
+        }
+        return p
     }
 }
 

@@ -42,7 +42,7 @@ final class AppModel: ObservableObject {
 
     var attentionCount: Int { sessions.values.filter { $0.status.needsAttention }.count }
 
-    var needsSetup: Bool { !installer.isInstalled(.claude) && !installer.isInstalled(.codex) }
+    var needsSetup: Bool { !AgentSource.allCases.contains { installer.isInstalled($0) } }
 
     func start() {
         if Demo.isOn {

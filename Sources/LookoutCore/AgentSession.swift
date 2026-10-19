@@ -93,10 +93,10 @@ public struct AgentSession: Identifiable, Sendable, Equatable {
 /// Pure state machine: hook events in, session state out.
 public enum SessionReducer {
     /// Tools that block on a question to the user.
-    static let questionTools: Set<String> = ["AskUserQuestion", "request_user_input"]
+    static let questionTools: Set<String> = ["AskUserQuestion", "request_user_input", "ask_user"]
 
     public static func apply(_ envelope: HookEnvelope, to existing: AgentSession?, now: Date = Date()) -> AgentSession {
-        let p = envelope.payload
+        let p = envelope.payload.normalized(for: envelope.source)
         let ctx = envelope.context
         var s = existing ?? AgentSession(
             source: envelope.source, host: envelope.host, sessionID: p.sessionID, cwd: p.cwd ?? "~",

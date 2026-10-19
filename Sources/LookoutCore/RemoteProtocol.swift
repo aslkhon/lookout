@@ -71,6 +71,8 @@ public enum RemoteMessage: Sendable {
                 agent = AgentDiscovery.agent(from: file, tty: tty, hostBundleID: nil)
             case .codex:
                 agent = DiscoveredAgent(source: .codex, pid: agentPID, cwd: cwd, tty: tty)
+            case .gemini, .opencode:
+                return nil // not on ssh hosts yet
             }
             agent.host = host
             agent.ancestors = ancestors

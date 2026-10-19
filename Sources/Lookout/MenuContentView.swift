@@ -183,7 +183,7 @@ struct MenuContentView: View {
         VStack(spacing: 6) {
             Image(systemName: "binoculars").font(.title2).foregroundStyle(.secondary)
             Text("No agents yet").font(.callout.weight(.medium))
-            Text("Start Claude Code or Codex in any terminal.\nAgents already running appear after their next action.")
+            Text("Start Claude Code, Codex, Gemini CLI or OpenCode in any terminal.\nAgents already running appear after their next action.")
                 .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)

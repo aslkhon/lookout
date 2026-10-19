@@ -10,8 +10,9 @@ public enum InstallerError: LocalizedError {
     }
 }
 
-/// Adds/removes Lookout's hook entries in `~/.claude/settings.json` and `~/.codex/hooks.json`.
-/// Other hooks in those files are left untouched; a timestamped backup is written before each change.
+/// Adds/removes Lookout's hook entries in `~/.claude/settings.json`, `~/.codex/hooks.json` and
+/// `~/.gemini/settings.json`, and its OpenCode plugin. Other hooks in those files are left untouched;
+/// a timestamped backup is written before each change.
 public struct HookInstaller {
     public static let marker = "lookout-hook"
 
@@ -24,6 +25,8 @@ public struct HookInstaller {
     static let claudeToolEvents: Set<String> = ["PreToolUse", "PostToolUse", "PostToolUseFailure", "PermissionRequest"]
     static let codexEvents = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse",
                               "PermissionRequest", "Stop", "Interrupt", "SessionEnd"]
+    static let geminiEvents = ["SessionStart", "BeforeAgent", "BeforeTool", "AfterTool", "AfterAgent",
+                               "Notification", "SessionEnd"]
 
     public var home: URL
     public var hookBinaryPath: String
@@ -35,9 +38,16 @@ public struct HookInstaller {
 
     public var claudeSettingsURL: URL { home.appendingPathComponent(".claude/settings.json") }
     public var codexHooksURL: URL { home.appendingPathComponent(".codex/hooks.json") }
+    public var geminiSettingsURL: URL { home.appendingPathComponent(".gemini/settings.json") }
 
+    /// The file Lookout's hooks go in; OpenCode's is the plugin itself.
     public func configURL(for source: AgentSource) -> URL {
-        source == .claude ? claudeSettingsURL : codexHooksURL
+        switch source {
+        case .claude: claudeSettingsURL
+        case .codex: codexHooksURL
+        case .gemini: geminiSettingsURL
+        case .opencode: OpenCodePlugin.url(home: home)
+        }
     }
 
     public func command(for source: AgentSource) -> String {
@@ -47,6 +57,9 @@ public struct HookInstaller {
     // MARK: File operations
 
     public func isInstalled(_ source: AgentSource) -> Bool {
+        if source == .opencode {
+            return (try? String(contentsOf: configURL(for: source), encoding: .utf8))?.contains(hookBinaryPath) ?? false
+        }
         guard let root = try? readJSON(configURL(for: source)),
               let hooks = root["hooks"] as? [String: Any] else { return false }
         let cmd = command(for: source)
@@ -61,6 +74,11 @@ public struct HookInstaller {
     /// PermissionRequest hook timed out after 10 s, or a Claude install without the status line wrapper.
     public func upgradeInstalled() {
         for source in AgentSource.allCases where isInstalled(source) {
+            if source == .opencode {
+                let current = try? String(contentsOf: configURL(for: source), encoding: .utf8)
+                if current != OpenCodePlugin.source(hookBinaryPath: hookBinaryPath) { try? install(source) }
+                continue
+            }
             guard let root = try? readJSON(configURL(for: source)),
                   let hooks = root["hooks"] as? [String: Any],
                   events(for: source).contains("PermissionRequest") else { continue }
@@ -76,6 +94,7 @@ public struct HookInstaller {
 
     /// Number of Lookout hook entries in the agent's config.
     public func entryCount(_ source: AgentSource) -> Int {
+        if source == .opencode { return isInstalled(source) ? 1 : 0 }
         guard let root = try? readJSON(configURL(for: source)),
               let hooks = root["hooks"] as? [String: Any] else { return 0 }
         return hooks.values.reduce(0) { $0 + Self.commands(in: $1).filter { $0.contains(Self.marker) }.count }
@@ -83,10 +102,16 @@ public struct HookInstaller {
 
     public func install(_ source: AgentSource) throws {
         let url = configURL(for: source)
+        if source == .opencode {
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data(OpenCodePlugin.source(hookBinaryPath: hookBinaryPath).utf8).write(to: url, options: .atomic)
+            return
+        }
         var root = try readJSON(url)
         let hooks = root["hooks"] as? [String: Any] ?? [:]
         root["hooks"] = Self.addingLookout(to: hooks, events: events(for: source), command: command(for: source),
-                                           matcherEvents: source == .claude ? Self.claudeToolEvents : [])
+                                           matcherEvents: source == .claude ? Self.claudeToolEvents : [],
+                                           milliseconds: source == .gemini)
         if source == .claude { root = try statusLine.installing(into: root) } // for plan limits
         try writeJSON(root, to: url)
     }
@@ -94,6 +119,7 @@ public struct HookInstaller {
     public func uninstall(_ source: AgentSource) throws {
         let url = configURL(for: source)
         guard FileManager.default.fileExists(atPath: url.path) else { return }
+        if source == .opencode { try FileManager.default.removeItem(at: url); return }
         var root = try readJSON(url)
         if source == .claude { root = statusLine.removing(from: root) }
         guard let hooks = root["hooks"] as? [String: Any] else { try writeJSON(root, to: url); return }
@@ -103,18 +129,24 @@ public struct HookInstaller {
     }
 
     func events(for source: AgentSource) -> [String] {
-        source == .claude ? Self.claudeEvents : Self.codexEvents
+        switch source {
+        case .claude: Self.claudeEvents
+        case .codex: Self.codexEvents
+        case .gemini: Self.geminiEvents
+        case .opencode: []
+        }
     }
 
     // MARK: Pure transforms
 
     /// Returns `hooks` with exactly one Lookout entry per event (any previous Lookout entries are replaced).
+    /// Gemini CLI's timeouts are in `milliseconds`, the others' in seconds.
     static func addingLookout(to hooks: [String: Any], events: [String], command: String,
-                              matcherEvents: Set<String>) -> [String: Any] {
+                              matcherEvents: Set<String>, milliseconds: Bool = false) -> [String: Any] {
         var result = removingLookout(from: hooks)
         for event in events {
             // A permission request waits up to 590 s for an answer from Lookout.
-            let timeout = event == "PermissionRequest" ? 600 : 10
+            let timeout = (event == "PermissionRequest" ? 600 : 10) * (milliseconds ? 1000 : 1)
             var group: [String: Any] = ["hooks": [["type": "command", "command": command, "timeout": timeout]]]
             if matcherEvents.contains(event) { group["matcher"] = "*" }
             result[event] = (result[event] as? [Any] ?? []) + [group]

@@ -64,7 +64,7 @@ final class SelfTest: ObservableObject {
     // MARK: Checks
 
     private func agentPresent(_ source: AgentSource) -> Bool {
-        FileManager.default.fileExists(atPath: LookoutPaths.home.appendingPathComponent(source == .claude ? ".claude" : ".codex").path)
+        FileManager.default.fileExists(atPath: LookoutPaths.home.appendingPathComponent(source.configDir).path)
     }
 
     private func hookBinary() -> Check {
@@ -115,14 +115,14 @@ final class SelfTest: ObservableObject {
     private func hooks(_ source: AgentSource, installer: HookInstaller) -> Check {
         let title = "\(source.displayName) hooks"
         let url = installer.configURL(for: source)
-        if let data = FileManager.default.contents(atPath: url.path), !data.isEmpty,
+        if source != .opencode, let data = FileManager.default.contents(atPath: url.path), !data.isEmpty,
            (try? JSONSerialization.jsonObject(with: data)) == nil {
             return Check(title: title, level: .failed, detail: "\(url.path) isn't valid JSON, so the agent can't read its hooks.")
         }
         guard installer.isInstalled(source) else {
             return Check(title: title, level: .failed, detail: "Not installed. Install them under Agents.")
         }
-        return Check(title: title, level: .ok, detail: "Installed in \(url.path)")
+        return Check(title: title, level: .ok, detail: source == .opencode ? "Plugin at \(url.path)" : "Installed in \(url.path)")
     }
 
     private func statusLine(installer: HookInstaller) -> Check {

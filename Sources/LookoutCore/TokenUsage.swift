@@ -38,6 +38,7 @@ public struct TokenUsage: Equatable, Sendable {
     /// Takes in one transcript line. Claude: an assistant message's usage, once per message (each content
     /// block's line repeats it, one after another). Codex: `token_count` events carry running totals.
     mutating func add(line: Data, source: AgentSource, lastID: inout String?) {
+        guard source == .claude || source == .codex else { return } // the others' transcripts aren't read
         // Most lines have no usage; skip parsing them.
         let wanted = source == .claude ? Self.claudeMarkers.allSatisfy { line.range(of: $0) != nil }
             : Self.codexMarkers.contains { line.range(of: $0) != nil }
@@ -71,6 +72,8 @@ public struct TokenUsage: Equatable, Sendable {
                               output: usage["output_tokens"] as? Int ?? 0)
             codexModel = model
             cost = model.flatMap { Pricing.cost(model: $0, ModelTokens(input: input, cacheWrite5m: cacheWrite, cacheRead: cacheRead, output: output)) }
+        case .gemini, .opencode:
+            break
         }
     }
 
