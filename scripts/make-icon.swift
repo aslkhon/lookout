@@ -1,6 +1,41 @@
 // Renders Resources/AppIcon.icns. Run: swift scripts/make-icon.swift
 import AppKit
 
+// The four agents peeking up from the bottom, as pixel art on a 24×24 grid, with the amber "needs you".
+let art = [
+    "........................",
+    "........................",
+    "........................",
+    "........................",
+    "........................",
+    "........................",
+    "........................",
+    "........................",
+    "........................",
+    "........................",
+    "........................",
+    "........................",
+    "................AA......",
+    "................AA......",
+    "........................",
+    "........................",
+    "..OOO...GGG...BBB...WWW.",
+    ".OOOOO.GGGGG.BBBBB.WWWWW",
+    ".OeOeO.GeGeG.BeBeB.WeWeW",
+    ".OeOeO.GeGeG.BeBeB.WeWeW",
+    ".OOOOO.GGGGG.BBBBB.WWWWW",
+    ".OOOOO.GGGGG.BBBBB.WWWWW",
+    ".OOOOO.GGGGG.BBBBB.WWWWW",
+    ".OOOOO.GGGGG.BBBBB.WWWWW"
+]
+let palette: [Character: UInt32] = [
+    "O": 0xD97757, "G": 0xB9C1CD, "B": 0x4F86F7, "W": 0xF3F0EA, "e": 0x1E1D22, "A": 0xFFB82E,
+]
+
+func color(_ v: UInt32) -> NSColor {
+    NSColor(srgbRed: CGFloat(v >> 16 & 0xFF) / 255, green: CGFloat(v >> 8 & 0xFF) / 255, blue: CGFloat(v & 0xFF) / 255, alpha: 1)
+}
+
 func render(_ px: Int) -> Data {
     let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: px, pixelsHigh: px, bitsPerSample: 8,
                                samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
@@ -22,21 +57,24 @@ func render(_ px: Int) -> Data {
     shape.fill()
     NSGraphicsContext.restoreGraphicsState()
 
-    NSGradient(colors: [NSColor(red: 0.07, green: 0.11, blue: 0.27, alpha: 1),
-                        NSColor(red: 0.05, green: 0.42, blue: 0.55, alpha: 1)])!
-        .draw(in: shape, angle: 90)
+    NSGradient(colors: [color(0x121115), color(0x1E1D22)])!.draw(in: shape, angle: 90)
 
-    // Binoculars, white.
-    let config = NSImage.SymbolConfiguration(pointSize: 430 * s, weight: .semibold)
-        .applying(.init(paletteColors: [.white]))
-    let symbol = NSImage(systemSymbolName: "binoculars.fill", accessibilityDescription: nil)!
-        .withSymbolConfiguration(config)!
-    let size = symbol.size
-    symbol.draw(in: NSRect(x: (CGFloat(px) - size.width) / 2, y: (CGFloat(px) - size.height) / 2 - 20 * s, width: size.width, height: size.height))
-
-    // Amber "needs you" badge in the top-right corner.
-    NSColor(red: 1.0, green: 0.72, blue: 0.18, alpha: 1).setFill()
-    NSBezierPath(ovalIn: NSRect(x: 712 * s, y: 712 * s, width: 140 * s, height: 140 * s)).fill()
+    // Cells sit on a grid inset from the body; the bottom row runs to the body's edge, which clips it.
+    NSGraphicsContext.saveGraphicsState()
+    shape.addClip()
+    NSGraphicsContext.current?.shouldAntialias = false
+    let n = art.count, inset = 40 * s, cell = (824 * s - 2 * inset) / CGFloat(n)
+    for (row, line) in art.enumerated() {
+        for (col, ch) in line.enumerated() {
+            guard let v = palette[ch] else { continue }
+            color(v).setFill()
+            // Cells overlap by a hair so no seams show between them.
+            let bottom = row == n - 1 ? inset : 0
+            NSRect(x: body.minX + inset + CGFloat(col) * cell, y: body.maxY - inset - CGFloat(row + 1) * cell - bottom,
+                   width: cell + 0.5, height: cell + 0.5 + bottom).fill()
+        }
+    }
+    NSGraphicsContext.restoreGraphicsState()
 
     NSGraphicsContext.restoreGraphicsState()
     return rep.representation(using: .png, properties: [:])!
