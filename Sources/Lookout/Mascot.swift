@@ -307,11 +307,13 @@ struct MascotIcon: NSViewRepresentable {
     /// Shifts the loop so neighbouring rows don't move in step.
     var phase: Double = 0
     var animated = true
+    /// A few seconds of movement, then a longer rest.
+    var occasional = false
 
     func makeNSView(context: Context) -> MascotView { MascotView() }
 
     func updateNSView(_ view: MascotView, context: Context) {
-        view.configure(kind: kind, scene: scene, phase: phase, animated: animated)
+        view.configure(kind: kind, scene: scene, phase: phase, animated: animated, occasional: occasional)
     }
 }
 
@@ -320,24 +322,84 @@ final class MascotView: NSView {
     private var scene = MascotScene.idle
     private var phase = 0.0
     private var animated = true
+    private var occasional = false
+    /// Off while an occasional mascot rests.
+    private var awake = true
+    private var nap: Timer?
     private var link: CADisplayLink?
+    private var occlusion: NSObjectProtocol?
+    /// The art, as an image on a plain layer: AppKit's drawing around `draw(_:)` cost several times
+    /// the drawing itself, a dozen times a second per mascot.
+    private let sprite = CALayer()
+    /// The frame is drawn here first, and shown only if it differs from the last: most ticks it doesn't.
+    private var canvas: CGContext?
+    private var lastFrame: Data?
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        sprite.actions = ["contents": NSNull(), "position": NSNull(), "bounds": NSNull()]
+        layer?.addSublayer(sprite)
+    }
+
+    required init?(coder: NSCoder) { nil }
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
-    func configure(kind: MascotKind, scene: MascotScene, phase: Double, animated: Bool) {
-        guard kind != self.kind || scene != self.scene || phase != self.phase || animated != self.animated else { return }
+    func configure(kind: MascotKind, scene: MascotScene, phase: Double, animated: Bool, occasional: Bool) {
+        guard kind != self.kind || scene != self.scene || phase != self.phase || animated != self.animated
+                || occasional != self.occasional else { return }
         (self.kind, self.scene, self.phase, self.animated) = (kind, scene, phase, animated)
+        if occasional != self.occasional {
+            self.occasional = occasional
+            awake = true
+            scheduleNap()
+        }
         updateLink()
-        needsDisplay = true
+        render()
+    }
+
+    /// Moves for 3 s out of every 20.
+    private func scheduleNap() {
+        nap?.invalidate()
+        nap = nil
+        guard occasional else { return }
+        nap = Timer.scheduledTimer(withTimeInterval: awake ? 3 : 17, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.awake.toggle()
+                self.updateLink()
+                self.scheduleNap()
+            }
+        }
     }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        // Hidden windows (the closed menu, an ordered-out panel) keep their views: no ticking there.
+        occlusion.map(NotificationCenter.default.removeObserver)
+        occlusion = window.map {
+            NotificationCenter.default.addObserver(forName: NSWindow.didChangeOcclusionStateNotification, object: $0,
+                                                   queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.updateLink() }
+            }
+        }
         updateLink()
+        place()
+    }
+
+    override func layout() {
+        super.layout()
+        place()
+    }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        place()
     }
 
     private func updateLink() {
-        let wanted = animated && scene != .ended && window != nil
+        let wanted = animated && awake && scene != .ended && window?.occlusionState.contains(.visible) == true
         if wanted, link == nil {
             let link = displayLink(target: self, selector: #selector(tick))
             link.preferredFrameRateRange = CAFrameRateRange(minimum: 8, maximum: 12, preferred: 12)
@@ -350,17 +412,34 @@ final class MascotView: NSView {
     }
 
     @objc private func tick() {
-        if window?.occlusionState.contains(.visible) == true { needsDisplay = true }
+        if window?.occlusionState.contains(.visible) == true { render() }
     }
 
-    override func draw(_ dirtyRect: NSRect) {
-        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
-        // Whole device pixels per grid cell keep the art crisp; it may spill a point past the frame.
+    /// Whole device pixels per grid cell keep the art crisp; it may spill a point past the frame.
+    private func place() {
         let scale = window?.backingScaleFactor ?? 2
         let side = max(1, (min(bounds.width, bounds.height) * scale / 16).rounded()) * 16 / scale
-        let origin = CGPoint(x: ((bounds.midX - side / 2) * scale).rounded() / scale,
-                             y: ((bounds.midY - side / 2) * scale).rounded() / scale)
-        let t = animated ? CACurrentMediaTime() + phase : 0
-        Mascot.draw(kind, scene, t: t, in: ctx, rect: CGRect(origin: origin, size: CGSize(width: side, height: side)))
+        sprite.frame = CGRect(x: ((bounds.midX - side / 2) * scale).rounded() / scale,
+                              y: ((bounds.midY - side / 2) * scale).rounded() / scale,
+                              width: side, height: side)
+        sprite.contentsScale = scale
+        let pixels = Int((side * scale).rounded())
+        if canvas?.width != pixels {
+            canvas = CGContext(data: nil, width: pixels, height: pixels, bitsPerComponent: 8, bytesPerRow: pixels * 4,
+                               space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+            lastFrame = nil
+        }
+        render()
+    }
+
+    private func render() {
+        guard let canvas, let pixels = canvas.data else { return }
+        let rect = CGRect(x: 0, y: 0, width: canvas.width, height: canvas.height)
+        canvas.clear(rect)
+        Mascot.draw(kind, scene, t: animated ? CACurrentMediaTime() + phase : 0, in: canvas, rect: rect)
+        let frame = Data(bytes: pixels, count: canvas.bytesPerRow * canvas.height)
+        guard frame != lastFrame else { return }
+        lastFrame = frame
+        sprite.contents = canvas.makeImage()
     }
 }

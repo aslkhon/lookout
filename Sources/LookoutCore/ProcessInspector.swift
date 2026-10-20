@@ -94,13 +94,26 @@ public enum ProcessInspector {
 
     /// Bundle identifier of the GUI app hosting `pid`: the first ancestor whose executable lives
     /// inside an `.app` bundle (outermost bundle, so VS Code's "Code Helper" resolves to VS Code).
+    /// Opening a bundle reads the disk, and discovery asks for every agent every few seconds.
+    nonisolated(unsafe) private static var bundleIDs: [String: String?] = [:]
+    private static let bundleIDsLock = NSLock()
+
+    private static func bundleID(ofApp path: String) -> String? {
+        bundleIDsLock.withLock {
+            if let known = bundleIDs[path] { return known }
+            let id = Bundle(path: path)?.bundleIdentifier
+            bundleIDs[path] = id
+            return id
+        }
+    }
+
     public static func hostBundleID(of pid: pid_t) -> String? {
         var current = pid
         for _ in 0..<16 {
             guard current > 1, let info = info(current) else { return nil }
             let path = executablePath(current)
             if let range = path.range(of: ".app/") {
-                return Bundle(path: String(path[..<range.lowerBound]) + ".app")?.bundleIdentifier
+                return bundleID(ofApp: String(path[..<range.lowerBound]) + ".app")
             }
             current = info.ppid
         }

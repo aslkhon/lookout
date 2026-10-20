@@ -121,11 +121,15 @@ struct StatusDot: View {
 struct StatusIcon: View {
     let session: AgentSession
     var size: CGFloat = 15
+    var animated = true
+    /// Moving only now and then, for where it's always on screen, like beside the notch: redrawing all
+    /// day costs battery.
+    var occasional = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         MascotIcon(kind: MascotKind(session.source), scene: MascotScene(session),
-                   phase: Double(abs(session.id.hashValue) % 1000) / 100, animated: !reduceMotion)
+                   phase: Double(abs(session.id.hashValue) % 1000) / 100, animated: animated && !reduceMotion, occasional: occasional)
             .frame(width: size, height: size)
             .help("\(session.source.displayName): \(session.statusLabel)")
             .accessibilityElement()

@@ -161,7 +161,7 @@ struct NotchView: View {
         // ZStacks, not Groups: an empty Group has no frame, and the ears would shift off-center.
         HStack(spacing: 0) {
             ZStack {
-                if let first = live.first { StatusIcon(session: first, size: 14) }
+                if let first = live.first { StatusIcon(session: first, size: 14, occasional: true) }
             }
             .frame(width: Self.ear)
             Spacer().frame(width: state.notch.width)

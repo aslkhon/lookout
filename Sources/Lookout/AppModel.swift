@@ -30,6 +30,8 @@ final class AppModel: ObservableObject {
     @Published private var approvals: [String: (request: UUID, pending: any PendingApproval, questions: [AgentQuestion], plan: String?)] = [:]
     /// Sessions that have sent hook events; their status comes from hooks, not discovery.
     private var hookDriven: Set<String> = []
+    /// Codex permission requests not shown yet: its auto-reviewer may answer them within seconds.
+    private var heldRequests: [String: Task<Void, Never>] = [:]
 
     /// How long ended sessions stay in the list.
     private let endedRetention: TimeInterval = 10 * 60
@@ -83,9 +85,15 @@ final class AppModel: ObservableObject {
         Notifier.shared.onDecide = { [weak self] id, request, decision in self?.decide(id, request: request, decision) }
     }
 
-    func handle(_ envelope: HookEnvelope, responder: Responder? = nil) {
+    func handle(_ envelope: HookEnvelope, responder: Responder? = nil, held: Bool = false) {
         if SelfTest.shared.claim(envelope.payload.sessionID) { return }
         let key = AgentSession.key(source: envelope.source, sessionID: envelope.payload.sessionID, host: envelope.host)
+        // Anything newer from the agent means it moved on without the user.
+        heldRequests.removeValue(forKey: key)?.cancel()
+        if !held, envelope.source == .codex, envelope.payload.hookEventName == "PermissionRequest" {
+            hold(envelope, key: key)
+            return
+        }
         hookDriven.insert(key)
         // A Codex agent found by scanning becomes this session once its hooks report in.
         let placeholder = envelope.context.agentPID.map {
@@ -119,6 +127,24 @@ final class AppModel: ObservableObject {
             Notifier.shared.post(for: new, request: approvals[key]?.request)
         } else if old?.status != new.status {
             Notifier.shared.clear(sessionID: key)
+        }
+    }
+
+    /// Shows a Codex permission request only if, after a few seconds, the agent is still waiting and its
+    /// auto-reviewer (whose reviews take 2–5 s) hasn't taken it.
+    private func hold(_ envelope: HookEnvelope, key: String) {
+        let asked = Date()
+        heldRequests[key] = Task { [weak self] in
+            for _ in 0..<8 {
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled else { return }
+                if envelope.host == nil, CodexReviewer.reviewed(envelope.payload.sessionID, since: asked) {
+                    self?.heldRequests[key] = nil
+                    return
+                }
+            }
+            self?.heldRequests[key] = nil
+            self?.handle(envelope, held: true)
         }
     }
 
